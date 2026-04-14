@@ -571,7 +571,7 @@ export async function estimateMarketPricePerSqft(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5-mini",
+        model: process.env.AI_MODEL || "gemini-2.0-flash",
         max_completion_tokens: 128,
         response_format: { type: "json_object" },
         messages: [

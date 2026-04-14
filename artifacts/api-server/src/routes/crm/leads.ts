@@ -703,7 +703,7 @@ Do not include markdown, only the raw JSON object.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5-mini",
+        model: process.env.AI_MODEL || "gemini-2.0-flash",
         max_completion_tokens: 8192,
         response_format: { type: "json_object" },
         messages: [
@@ -1009,7 +1009,7 @@ async function fetchCompsViaAI(lead: any, leadId: number, subjectProp: {
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-5-mini",
+        model: process.env.AI_MODEL || "gemini-2.0-flash",
         max_completion_tokens: 2048,
         response_format: { type: "json_object" },
         messages: [
