@@ -1,8 +1,7 @@
 [phases.setup]
-nixPkgs = ['nodejs_20', 'pnpm', 'openssl', 'postgresql']
+nixPkgs = ['nodejs-22_x', 'pnpm', 'openssl', 'postgresql']
 nixLibs = ['zlib', 'openssl', 'stdenv.cc.cc.lib']
 
 [phases.build]
 # This ensures Prisma client is generated before Vite tries to build the frontend
 cmds = ['pnpm install --no-frozen-lockfile', 'npx prisma generate', 'pnpm run build']
-
