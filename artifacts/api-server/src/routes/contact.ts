@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { SubmitContactBody, SubmitContactResponse } from "@workspace/api-zod";
+import * as ZodSchemas from "@workspace/api-zod";
+const { SubmitContactBody, SubmitContactResponse } = ZodSchemas;
 import { db, contactsTable } from "@workspace/db";
 import nodemailer from "nodemailer";
 

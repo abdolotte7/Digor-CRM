@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { SubmitSubscribeBody, SubmitSubscribeResponse } from "@workspace/api-zod";
+import * as ZodSchemas from "@workspace/api-zod";
+const { SubmitSubscribeBody, SubmitSubscribeResponse } = ZodSchemas;
 import { db, subscribersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import nodemailer from "nodemailer";

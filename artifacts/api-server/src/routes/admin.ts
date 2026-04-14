@@ -2,14 +2,17 @@ import { Router, type IRouter, type Request, type Response, type NextFunction } 
 import jwt from "jsonwebtoken";
 import { db, contactsTable, subscribersTable } from "@workspace/db";
 import { eq, desc, count } from "drizzle-orm";
-import {
+import * as ZodSchemas from "@workspace/api-zod";
+
+// Accessing them from the namespace ensures TS treats them as values
+const {
   AdminLoginBody,
   AdminLoginResponse,
   AdminGetContactsResponse,
   AdminGetSubscribersResponse,
   AdminGetStatsResponse,
   AdminMarkContactReadResponse,
-} from "@workspace/api-zod";
+} = ZodSchemas;
 
 const router: IRouter = Router();
 
