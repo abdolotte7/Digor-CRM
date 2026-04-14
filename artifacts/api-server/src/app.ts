@@ -155,17 +155,17 @@ if (process.env.NODE_ENV === "production") {
   const websiteDir = path.join(cwd, "artifacts/digor-website/dist/public");
 
   app.use("/crm", express.static(crmDir));
-  app.get("/crm/(.*)", (_req: Request, res: Response) => {
+  app.get("/crm/:path*", (_req: Request, res: Response) => {
     res.sendFile(path.join(crmDir, "index.html"));
   });
 
   app.use("/tools", express.static(toolsDir));
-  app.get("/tools/(.*)", (_req: Request, res: Response) => {
+  app.get("/tools/:path*", (_req: Request, res: Response) => {
     res.sendFile(path.join(toolsDir, "index.html"));
   });
 
   app.use("/", express.static(websiteDir));
-  app.get("/(.*)", (_req: Request, res: Response) => {
+  app.get("/:path*", (_req: Request, res: Response) => {
     res.sendFile(path.join(websiteDir, "index.html"));
   });
 }
