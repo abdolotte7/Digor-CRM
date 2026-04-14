@@ -1,6 +1,6 @@
 {
   "name": "workspace",
-  "engines": { "node": "22" },
+  "engines": { "node": "20" },
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {

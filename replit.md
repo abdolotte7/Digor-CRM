@@ -7,7 +7,7 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 22
+- **Node.js version**: 20
 - **Package manager**: pnpm
 - **TypeScript version**: 5.9
 - **API framework**: Express 5
