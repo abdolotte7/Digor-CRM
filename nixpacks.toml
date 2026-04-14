@@ -1,4 +1,4 @@
 [phases.setup]
 nixPkgs = ['nodejs-24_x', 'pnpm-9_x', 'openssl']
 nixLibs = ['zlib']
-aptPkgs = ['libssl3' , 'libssl-dev' , 'libssl-doc' , 'openssl' , 'libssl1.1' , 'libssl1.1-dev' , 'libssl1.1-doc' , 'openssl-dev'
+aptPkgs = ['libssl3' , 'libssl-dev' , 'libssl-doc' , 'openssl' , 'libssl1.1' , 'libssl1.1-dev' , 'libssl1.1-doc' , 'openssl-dev']
