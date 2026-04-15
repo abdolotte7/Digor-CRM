@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "db:push": "pnpm --filter @workspace/db run push",
-    "build": "pnpm run db:push && pnpm run typecheck && pnpm -r run build",
+    "build": "pnpm run typecheck && pnpm -r run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "tsc --build --emitDeclarationOnly || true"
   },

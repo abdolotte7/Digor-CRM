@@ -7,15 +7,18 @@ import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 const port = Number(process.env.PORT) || 3000;
 const basePath = process.env.BASE_PATH || "/";
 
+// Check if we are in development and inside a Replit environment
+const isReplitDev = process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined;
+
 export default defineConfig({
   base: basePath,
   plugins: [
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
+    // Conditional Replit-only plugins
+    ...(isReplitDev
       ? [
+          runtimeErrorOverlay(), // Moved here to avoid production "dead weight"
           await import("@replit/vite-plugin-cartographer").then((m) =>
             m.cartographer({
               root: path.resolve(import.meta.dirname, ".."),
