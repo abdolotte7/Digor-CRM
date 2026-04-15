@@ -1393,4 +1393,187 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
   }
 });
 
+// ─── AI Deal Scorer ───────────────────────────────────────────────────────────
+router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
+  const id = parseInt(req.params.id as string);
+  const crmUser = (req as any).crmUser;
+  try {
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+    const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const aiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    if (!aiBaseUrl || !aiApiKey) { res.status(503).json({ error: "AI service not configured" }); return; }
+
+    const arv = lead.arv ? parseFloat(lead.arv) : null;
+    const mao = lead.mao ? parseFloat(lead.mao) : null;
+    const askingPrice = lead.askingPrice ? parseFloat(lead.askingPrice) : null;
+    const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : null;
+
+    const prompt = `You are a real estate investment deal analyzer. Analyze this wholesale real estate deal and score it.
+
+Property: ${lead.address}, ${lead.city}, ${lead.state} ${lead.zip}
+Type: ${lead.propertyType || "Single Family"} | Beds: ${lead.beds || "?"} | Baths: ${lead.baths || "?"} | Sqft: ${lead.sqft || "?"} | Built: ${lead.yearBuilt || "?"}
+Condition (1-10): ${lead.condition || "unknown"} | Occupancy: ${lead.occupancy || "unknown"}
+ARV: ${arv ? "$" + arv.toLocaleString() : "not set"}
+Repair Cost: ${erc ? "$" + erc.toLocaleString() : "not set"}
+MAO: ${mao ? "$" + mao.toLocaleString() : "not set"}
+Asking Price: ${askingPrice ? "$" + askingPrice.toLocaleString() : "not set"}
+Reason for Selling: ${lead.reasonForSelling || "not provided"}
+How Soon: ${lead.howSoon || "not provided"}
+Is Rental: ${lead.isRental ? "Yes, $" + lead.rentalAmount + "/mo" : "No"}
+
+Reply ONLY with this JSON:
+{
+  "score": 7,
+  "grade": "B+",
+  "verdict": "Good deal with strong motivation",
+  "profitPotential": { "score": 8, "note": "Strong spread between ARV and asking price" },
+  "sellerMotivation": { "score": 9, "note": "Divorce, needs to sell ASAP" },
+  "dealRisk": { "score": 6, "note": "Condition unknown, verify repairs" },
+  "urgency": { "score": 7, "note": "Motivated to close within 30 days" },
+  "recommendation": "Pursue aggressively. Open at $140k, walk at $160k.",
+  "redFlags": ["Repair cost not verified", "Occupancy unknown"],
+  "positives": ["Strong seller motivation", "Good ARV-to-price spread"]
+}`;
+
+    const aiRes = await fetch(`${aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
+        max_tokens: 1024,
+        messages: [
+          { role: "system", content: "You are a real estate investment analyst. Reply only with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (!aiRes.ok) { const e = await aiRes.text().catch(() => ""); console.error("AI deal score error:", e); res.status(502).json({ error: "AI service returned an error." }); return; }
+    const aiJson = await aiRes.json() as any;
+    const raw = aiJson?.choices?.[0]?.message?.content || "";
+    const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+    res.json(JSON.parse(cleaned));
+  } catch (err) {
+    console.error("AI deal score error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── AI Seller Script ─────────────────────────────────────────────────────────
+router.post("/:id/ai-seller-script", crmAuth, async (req, res) => {
+  const id = parseInt(req.params.id as string);
+  const crmUser = (req as any).crmUser;
+  try {
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+    const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const aiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    if (!aiBaseUrl || !aiApiKey) { res.status(503).json({ error: "AI service not configured" }); return; }
+
+    const mao = lead.mao ? parseFloat(lead.mao) : null;
+    const askingPrice = lead.askingPrice ? parseFloat(lead.askingPrice) : null;
+
+    const prompt = `You are an expert real estate wholesaler coach. Generate a personalized phone call script for this seller.
+
+Seller: ${lead.sellerName} | Property: ${lead.address}, ${lead.city}, ${lead.state}
+Reason for Selling: ${lead.reasonForSelling || "not provided"} | How Soon: ${lead.howSoon || "not provided"}
+Asking Price: ${askingPrice ? "$" + askingPrice.toLocaleString() : "not provided"} | Our MAO: ${mao ? "$" + mao.toLocaleString() : "not calculated"}
+Occupancy: ${lead.occupancy || "unknown"} | Is Rental: ${lead.isRental ? "Yes, $" + lead.rentalAmount + "/mo" : "No"}
+Notes from previous calls: ${lead.notes || "none"}
+
+Reply ONLY with this JSON:
+{
+  "opening": "Script text for opening the call...",
+  "buildRapport": "Script for building rapport based on their situation...",
+  "discoverPain": "Questions to uncover their real motivation...",
+  "presentOffer": "How to present the offer naturally...",
+  "handleObjections": [
+    { "objection": "Your price is too low", "response": "I understand, let me explain..." }
+  ],
+  "closing": "How to close the call and set next steps...",
+  "tipsForThisLead": ["Tip 1 specific to this seller", "Tip 2"]
+}`;
+
+    const aiRes = await fetch(`${aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
+        max_tokens: 2048,
+        messages: [
+          { role: "system", content: "You are a real estate wholesaling coach. Reply only with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (!aiRes.ok) { const e = await aiRes.text().catch(() => ""); console.error("AI seller script error:", e); res.status(502).json({ error: "AI service returned an error." }); return; }
+    const aiJson = await aiRes.json() as any;
+    const raw = aiJson?.choices?.[0]?.message?.content || "";
+    const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+    res.json(JSON.parse(cleaned));
+  } catch (err) {
+    console.error("AI seller script error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── AI Offer Letter ──────────────────────────────────────────────────────────
+router.post("/:id/ai-offer-letter", crmAuth, async (req, res) => {
+  const id = parseInt(req.params.id as string);
+  const crmUser = (req as any).crmUser;
+  try {
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+    const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const aiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    if (!aiBaseUrl || !aiApiKey) { res.status(503).json({ error: "AI service not configured" }); return; }
+
+    const mao = lead.mao ? parseFloat(lead.mao) : null;
+    const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+    const prompt = `Generate a professional real estate cash offer Letter of Intent (LOI) for this property.
+
+Date: ${today} | Seller: ${lead.sellerName}
+Property: ${lead.address}, ${lead.city}, ${lead.state} ${lead.zip}
+Type: ${lead.propertyType || "Single Family Residence"}
+Offer Price: ${mao ? "$" + mao.toLocaleString() : "[OFFER PRICE]"}
+Closing Timeline: ${lead.howSoon || "30 days"}
+
+Reply ONLY with this JSON:
+{
+  "subject": "Cash Offer – [Address]",
+  "letter": "Full professional letter text with proper paragraphs separated by \\n\\n. Include: date, greeting, property reference, all-cash offer amount, closing timeline, as-is purchase, inspection period, next steps, and [YOUR NAME] signature placeholder."
+}`;
+
+    const aiRes = await fetch(`${aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
+        max_tokens: 1500,
+        messages: [
+          { role: "system", content: "You are a real estate attorney assistant. Generate professional offer letters. Reply only with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (!aiRes.ok) { const e = await aiRes.text().catch(() => ""); console.error("AI offer letter error:", e); res.status(502).json({ error: "AI service returned an error." }); return; }
+    const aiJson = await aiRes.json() as any;
+    const raw = aiJson?.choices?.[0]?.message?.content || "";
+    const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+    res.json(JSON.parse(cleaned));
+  } catch (err) {
+    console.error("AI offer letter error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 export default router;

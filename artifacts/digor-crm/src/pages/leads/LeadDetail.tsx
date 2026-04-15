@@ -1058,6 +1058,250 @@ function AiRepairEstimator({ leadId, onApplied }: { leadId: number; onApplied: (
     </Card>
   );
 }
+// ─── AI Deal Scorer ────────────────────────────────────────────────────────────
+function AiDealScorer({ leadId }: { leadId: number }) {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any | null>(null);
+
+  async function handleScore() {
+    setLoading(true);
+    setResult(null);
+    try {
+      const token = localStorage.getItem("crm_token");
+      const resp = await fetch(`/api/crm/leads/${leadId}/ai-deal-score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Scoring failed");
+      setResult(data);
+    } catch (err: any) {
+      toast({ title: "Scoring failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const scoreColor = (s: number) => s >= 8 ? "text-green-400" : s >= 6 ? "text-yellow-400" : "text-red-400";
+  const gradeColor = (g: string) => g?.startsWith("A") ? "bg-green-500/20 text-green-400" : g?.startsWith("B") ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400";
+
+  return (
+    <Card className="rounded-2xl border-white/5 bg-card shadow-lg overflow-hidden">
+      <div className="bg-secondary/30 p-4 border-b border-border flex items-center gap-2">
+        <TrendingUp className="w-5 h-5 text-primary" />
+        <h2 className="font-display font-semibold">AI Deal Scorer</h2>
+        <Badge variant="secondary" className="text-xs gap-1"><Sparkles className="w-3 h-3" />AI</Badge>
+      </div>
+      <div className="p-4 space-y-4">
+        <Button className="w-full gap-2 rounded-xl" onClick={handleScore} disabled={loading}>
+          {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing Deal…</> : <><Sparkles className="w-4 h-4" /> Score This Deal</>}
+        </Button>
+        {result && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/40 border border-white/5">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Deal Score</p>
+                <p className={`text-4xl font-bold ${scoreColor(result.score)}`}>{result.score}<span className="text-lg text-muted-foreground">/10</span></p>
+                <p className="text-sm text-muted-foreground mt-1">{result.verdict}</p>
+              </div>
+              <Badge className={`text-2xl font-bold px-4 py-2 ${gradeColor(result.grade)}`}>{result.grade}</Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "Profit Potential", data: result.profitPotential },
+                { label: "Seller Motivation", data: result.sellerMotivation },
+                { label: "Deal Risk", data: result.dealRisk },
+                { label: "Urgency", data: result.urgency },
+              ].map(({ label, data }) => data && (
+                <div key={label} className="p-3 rounded-xl bg-secondary/30 border border-white/5">
+                  <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                  <p className={`text-lg font-bold ${scoreColor(data.score)}`}>{data.score}/10</p>
+                  <p className="text-xs text-muted-foreground mt-1 leading-tight">{data.note}</p>
+                </div>
+              ))}
+            </div>
+            {result.recommendation && (
+              <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
+                <p className="text-xs font-semibold text-primary mb-1">Recommendation</p>
+                <p className="text-sm">{result.recommendation}</p>
+              </div>
+            )}
+            {result.positives?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-green-400 mb-2">Positives</p>
+                <ul className="space-y-1">{result.positives.map((p: string, i: number) => <li key={i} className="text-xs text-muted-foreground flex gap-2"><span className="text-green-400">✓</span>{p}</li>)}</ul>
+              </div>
+            )}
+            {result.redFlags?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-red-400 mb-2">Red Flags</p>
+                <ul className="space-y-1">{result.redFlags.map((f: string, i: number) => <li key={i} className="text-xs text-muted-foreground flex gap-2"><span className="text-red-400">⚠</span>{f}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ─── AI Seller Script ──────────────────────────────────────────────────────────
+function AiSellerScript({ leadId }: { leadId: number }) {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function handleGenerate() {
+    setLoading(true);
+    setResult(null);
+    try {
+      const token = localStorage.getItem("crm_token");
+      const resp = await fetch(`/api/crm/leads/${leadId}/ai-seller-script`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Script generation failed");
+      setResult(data);
+    } catch (err: any) {
+      toast({ title: "Script generation failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function copyAll() {
+    if (!result) return;
+    const text = [
+      "OPENING:\n" + result.opening,
+      "BUILD RAPPORT:\n" + result.buildRapport,
+      "DISCOVER PAIN:\n" + result.discoverPain,
+      "PRESENT OFFER:\n" + result.presentOffer,
+      "HANDLE OBJECTIONS:\n" + result.handleObjections?.map((o: any) => `Q: ${o.objection}\nA: ${o.response}`).join("\n\n"),
+      "CLOSING:\n" + result.closing,
+      result.tipsForThisLead?.length ? "TIPS:\n" + result.tipsForThisLead.map((t: string) => "• " + t).join("\n") : "",
+    ].filter(Boolean).join("\n\n---\n\n");
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  const Section = ({ title, content }: { title: string; content: string }) => (
+    <div className="space-y-1">
+      <p className="text-xs font-semibold text-primary uppercase tracking-wide">{title}</p>
+      <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap bg-secondary/30 p-3 rounded-xl border border-white/5">{content}</p>
+    </div>
+  );
+
+  return (
+    <Card className="rounded-2xl border-white/5 bg-card shadow-lg overflow-hidden">
+      <div className="bg-secondary/30 p-4 border-b border-border flex items-center gap-2">
+        <Phone className="w-5 h-5 text-primary" />
+        <h2 className="font-display font-semibold">AI Seller Script</h2>
+        <Badge variant="secondary" className="text-xs gap-1"><Sparkles className="w-3 h-3" />AI</Badge>
+      </div>
+      <div className="p-4 space-y-4">
+        <Button className="w-full gap-2 rounded-xl" onClick={handleGenerate} disabled={loading}>
+          {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating Script…</> : <><Sparkles className="w-4 h-4" /> Generate Call Script</>}
+        </Button>
+        {result && (
+          <div className="space-y-4">
+            <Button variant="outline" size="sm" className="w-full gap-2 rounded-xl" onClick={copyAll}>
+              {copied ? <><Check className="w-4 h-4" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy Full Script</>}
+            </Button>
+            {result.opening && <Section title="Opening" content={result.opening} />}
+            {result.buildRapport && <Section title="Build Rapport" content={result.buildRapport} />}
+            {result.discoverPain && <Section title="Discover Pain Points" content={result.discoverPain} />}
+            {result.presentOffer && <Section title="Present Offer" content={result.presentOffer} />}
+            {result.handleObjections?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-primary uppercase tracking-wide">Handle Objections</p>
+                {result.handleObjections.map((o: any, i: number) => (
+                  <div key={i} className="bg-secondary/30 p-3 rounded-xl border border-white/5 space-y-1">
+                    <p className="text-xs font-semibold text-yellow-400">"{o.objection}"</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{o.response}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {result.closing && <Section title="Closing" content={result.closing} />}
+            {result.tipsForThisLead?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-green-400 uppercase tracking-wide mb-2">Tips for This Lead</p>
+                <ul className="space-y-1">{result.tipsForThisLead.map((t: string, i: number) => <li key={i} className="text-xs text-muted-foreground flex gap-2"><span className="text-green-400">•</span>{t}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ─── AI Offer Letter ───────────────────────────────────────────────────────────
+function AiOfferLetter({ leadId }: { leadId: number }) {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ subject: string; letter: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function handleGenerate() {
+    setLoading(true);
+    setResult(null);
+    try {
+      const token = localStorage.getItem("crm_token");
+      const resp = await fetch(`/api/crm/leads/${leadId}/ai-offer-letter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Letter generation failed");
+      setResult(data);
+    } catch (err: any) {
+      toast({ title: "Letter generation failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function copyLetter() {
+    if (!result) return;
+    navigator.clipboard.writeText(`Subject: ${result.subject}\n\n${result.letter}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Card className="rounded-2xl border-white/5 bg-card shadow-lg overflow-hidden">
+      <div className="bg-secondary/30 p-4 border-b border-border flex items-center gap-2">
+        <FileText className="w-5 h-5 text-primary" />
+        <h2 className="font-display font-semibold">AI Offer Letter</h2>
+        <Badge variant="secondary" className="text-xs gap-1"><Sparkles className="w-3 h-3" />AI</Badge>
+      </div>
+      <div className="p-4 space-y-4">
+        <Button className="w-full gap-2 rounded-xl" onClick={handleGenerate} disabled={loading}>
+          {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating Letter…</> : <><Sparkles className="w-4 h-4" /> Generate Offer Letter</>}
+        </Button>
+        {result && (
+          <div className="space-y-3">
+            <div className="p-3 rounded-xl bg-secondary/40 border border-white/5">
+              <p className="text-xs text-muted-foreground mb-1">Subject Line</p>
+              <p className="text-sm font-semibold">{result.subject}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-secondary/30 border border-white/5">
+              <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{result.letter}</p>
+            </div>
+            <Button variant="outline" size="sm" className="w-full gap-2 rounded-xl" onClick={copyLetter}>
+              {copied ? <><Check className="w-4 h-4" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy Letter</>}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function LeadDetail() {
@@ -2328,6 +2572,15 @@ export default function LeadDetail() {
             }}
           />
 
+          {/* AI Deal Scorer */}
+          <AiDealScorer leadId={leadId} />
+
+          {/* AI Seller Script */}
+          <AiSellerScript leadId={leadId} />
+
+          {/* AI Offer Letter */}
+          <AiOfferLetter leadId={leadId} />
+          
           {/* Notes */}
           <Card className="rounded-2xl border-white/5 bg-card shadow-lg flex flex-col">
             <div className="bg-secondary/30 p-4 border-b border-border flex items-center gap-2">
