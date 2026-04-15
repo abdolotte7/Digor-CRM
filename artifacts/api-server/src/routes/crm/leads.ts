@@ -1413,38 +1413,45 @@ router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
     const askingPrice = lead.askingPrice ? parseFloat(lead.askingPrice) : null;
     const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : null;
 
+    // PRE-CALCULATE NUMBERS TO PREVENT AI MATH ERRORS
     const formattedMao = mao ? "$" + mao.toLocaleString() : "not set";
     const formattedAsking = askingPrice ? "$" + askingPrice.toLocaleString() : "not set";
+
+    // Calculate a target opening offer (85% of MAO) to "anchor" the AI
+    const suggestedOpening = mao ? (mao * 0.85).toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : "a discounted price";
+
     const reason = lead.reasonForSelling || "Not provided";
     const occupancyInfo = lead.isRental 
-      ? `Currently rented ($${lead.rentalAmount}/mo)` 
+      ? `Currently rented ($${lead.rentalAmount}/mo) with tenant in place` 
       : (lead.occupancy || "unknown");
 
-    const prompt = `You are a Real Estate Wholesaling Analyst. Your goal is to help the user (the BUYER) acquire this property at a deep discount.
+    const prompt = `You are a Real Estate Wholesale Investment Analyst. Your job is to help the user (BUYER) negotiate a deal BELOW their MAO.
 
-CRITICAL DATA:
-- Seller Motivation: ${reason}
-- Timeline: ${lead.howSoon || "Not provided"}
-- Our MAO (Hard Ceiling): ${formattedMao}
+FINANCIAL DATA:
+- Our MAO (Absolute Ceiling): ${formattedMao}
 - Seller Asking Price: ${formattedAsking}
-- Property Status: ${occupancyInfo}
+- Spread: ${mao && askingPrice ? (askingPrice - mao > 0 ? "Asking is ABOVE MAO" : "Asking is BELOW MAO") : "Unknown"}
 
-NEGOTIATION RULES FOR THE BUYER (USER):
-1. PERSPECTIVE: The user is the INVESTOR/BUYER. The lead is the SELLER.
-2. OPENING OFFER: Suggest an opening offer approximately 15-20% BELOW our MAO of ${formattedMao}.
-3. WALK-AWAY PRICE: The MAO (${formattedMao}) is the absolute maximum price the buyer should pay.
-4. SPREAD: If Asking (${formattedAsking}) is higher than MAO (${formattedMao}), warn the user that this is a difficult negotiation and requires high seller motivation to close the gap.
+NEGOTIATION STRATEGY:
+1. START LOW: Your recommended Opening Offer should be around ${suggestedOpening}.
+2. WALK AWAY: The absolute maximum you can pay is the MAO of ${formattedMao}. 
+3. LOGIC: Opening Offer must be LOWER than the Walk-Away Price. Never swap these.
 
-Reply ONLY with this JSON structure:
+SELLER CONTEXT:
+- Motivation: ${reason}
+- Timeline: ${lead.howSoon || "Not provided"}
+- Occupancy: ${occupancyInfo}
+
+Reply ONLY with this JSON:
 {
   "score": 0,
-  "grade": "Letter grade",
-  "verdict": "Investor-focused summary of the price spread and motivation.",
-  "profitPotential": { "score": 0, "note": "Analysis of profit based on buying AT or BELOW the MAO." },
+  "grade": "A-F",
+  "verdict": "Investor summary regarding the spread from ${formattedMao}.",
+  "profitPotential": { "score": 0, "note": "Analysis of the profit spread relative to ${formattedMao}." },
   "sellerMotivation": { "score": 0, "note": "Analysis based ONLY on: ${reason}" },
-  "dealRisk": { "score": 0, "note": "Risks regarding repairs or ${occupancyInfo}" },
-  "urgency": { "score": 0, "note": "Analysis based on ${lead.howSoon}" },
-  "recommendation": "Suggest opening at a discount and walking at the MAO ceiling of ${formattedMao}.",
+  "dealRisk": { "score": 0, "note": "Analysis of repairs and ${occupancyInfo}" },
+  "urgency": { "score": 0, "note": "Analysis of the ${lead.howSoon} timeline" },
+  "recommendation": "Suggest opening at ${suggestedOpening} and walking away at your MAO ceiling of ${formattedMao}.",
   "redFlags": [],
   "positives": []
 }`;
@@ -1459,7 +1466,7 @@ Reply ONLY with this JSON structure:
         messages: [
           { 
             role: "system", 
-            content: "You are a Real Estate Wholesale Investment Analyst. You advise the buyer on how to get the best deal below their Max Allowable Offer (MAO)." 
+            content: "You are a Real Estate Wholesaling Coach advising a buyer. Your goal is to maximize profit by keeping the purchase price below the MAO ceiling." 
           },
           { role: "user", content: prompt },
         ],
@@ -1483,7 +1490,6 @@ Reply ONLY with this JSON structure:
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 
 // ─── AI Seller Script (Fixed for Hallucinations) ─────────────────────────────
