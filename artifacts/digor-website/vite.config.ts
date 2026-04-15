@@ -5,7 +5,7 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 const port = Number(process.env.PORT) || 3000;
-const basePath = process.env.BASE_PATH || "/";
+const basePath = "/";
 
 // Check if we are in development and inside a Replit environment
 const isReplitDev = process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined;
