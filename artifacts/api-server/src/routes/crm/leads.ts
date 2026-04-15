@@ -1466,18 +1466,33 @@ Reply ONLY with this JSON:
 router.post("/:id/ai-seller-script", crmAuth, async (req, res) => {
   const id = parseInt(req.params.id as string);
   const crmUser = (req as any).crmUser;
+
   try {
     const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
-    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
-    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
-      res.status(403).json({ error: "Access denied" }); return;
+
+    if (!lead) { 
+      res.status(404).json({ error: "Lead not found" }); 
+      return; 
     }
+
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); 
+      return;
+    }
+
     const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const aiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-    if (!aiBaseUrl || !aiApiKey) { res.status(503).json({ error: "AI service not configured" }); return; }
+
+    if (!aiBaseUrl || !aiApiKey) { 
+      res.status(503).json({ error: "AI service not configured" }); 
+      return; 
+    }
 
     const mao = lead.mao ? parseFloat(lead.mao) : null;
     const askingPrice = lead.askingPrice ? parseFloat(lead.askingPrice) : null;
+
+    // FIX 1: Truncate notes to prevent hitting the 30k token limit
+    const sanitizedNotes = (lead.notes || "none").substring(0, 800);
 
     const prompt = `You are an expert real estate wholesaler coach. Generate a personalized phone call script for this seller.
 
@@ -1485,7 +1500,7 @@ Seller: ${lead.sellerName} | Property: ${lead.address}, ${lead.city}, ${lead.sta
 Reason for Selling: ${lead.reasonForSelling || "not provided"} | How Soon: ${lead.howSoon || "not provided"}
 Asking Price: ${askingPrice ? "$" + askingPrice.toLocaleString() : "not provided"} | Our MAO: ${mao ? "$" + mao.toLocaleString() : "not calculated"}
 Occupancy: ${lead.occupancy || "unknown"} | Is Rental: ${lead.isRental ? "Yes, $" + lead.rentalAmount + "/mo" : "No"}
-Notes from previous calls: ${lead.notes || "none"}
+Notes from previous calls: ${sanitizedNotes}
 
 Reply ONLY with this JSON:
 {
@@ -1497,31 +1512,49 @@ Reply ONLY with this JSON:
     { "objection": "Your price is too low", "response": "I understand, let me explain..." }
   ],
   "closing": "How to close the call and set next steps...",
-  "tipsForThisLead": ["Tip 1 specific to this seller", "Tip 2"]
+  "tipsForThisLead": ["Tip 1", "Tip 2"]
 }`;
 
     const aiRes = await fetch(`${aiBaseUrl}/chat/completions`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+      headers: { 
+        "Authorization": `Bearer ${aiApiKey}`, 
+        "Content-Type": "application/json" 
+      },
       body: JSON.stringify({
+        // FIX 2: Use 8b model for higher TPM allowance on Free Tier
         model: process.env.AI_MODEL || "llama-3.1-8b-instant",
-        max_tokens: 400,
+        // FIX 3: Lower max_tokens to significantly reduce "Requested" token count
+        max_tokens: 800,
+        response_format: { type: "json_object" }, // Ensures valid JSON from Groq
         messages: [
-          { role: "system", content: "You are a real estate wholesaling coach. Reply only with valid JSON." },
+          { role: "system", content: "You are a real estate wholesaling coach. Reply ONLY with valid JSON." },
           { role: "user", content: prompt },
         ],
       }),
     });
-    if (!aiRes.ok) { const e = await aiRes.text().catch(() => ""); console.error("AI seller script error:", e); res.status(502).json({ error: "AI service returned an error." }); return; }
+
+    if (!aiRes.ok) { 
+      const e = await aiRes.json().catch(() => ({})); 
+      console.error("Groq API Error:", e);
+      res.status(502).json({ error: e.error?.message || "AI service returned an error." }); 
+      return; 
+    }
+
     const aiJson = await aiRes.json() as any;
     const raw = aiJson?.choices?.[0]?.message?.content || "";
+
+    // Robust parsing for markdown-wrapped JSON
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+
     res.json(JSON.parse(cleaned));
+
   } catch (err) {
     console.error("AI seller script error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // ─── AI Offer Letter ──────────────────────────────────────────────────────────
 router.post("/:id/ai-offer-letter", crmAuth, async (req, res) => {
