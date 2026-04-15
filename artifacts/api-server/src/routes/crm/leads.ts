@@ -762,8 +762,8 @@ Do not include markdown, only the raw JSON object.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "gemini-2.0-flash",
-        max_tokens: 8192,
+        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+        max_tokens: 400,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -1067,8 +1067,8 @@ async function fetchCompsViaAI(lead: any, leadId: number, subjectProp: {
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "gemini-2.0-flash",
-        max_tokens: 1024,
+        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+        max_tokens: 400,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user",   content: userPrompt },
@@ -1444,7 +1444,7 @@ Reply ONLY with this JSON:
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: process.env.AI_MODEL || "llama-3.1-8b-instant",
-        max_tokens: 1024,
+        max_tokens: 400,
         messages: [
           { role: "system", content: "You are a real estate investment analyst. Reply only with valid JSON." },
           { role: "user", content: prompt },
@@ -1505,7 +1505,7 @@ Reply ONLY with this JSON:
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: process.env.AI_MODEL || "llama-3.1-8b-instant",
-        max_tokens: 1024,
+        max_tokens: 400,
         messages: [
           { role: "system", content: "You are a real estate wholesaling coach. Reply only with valid JSON." },
           { role: "user", content: prompt },
@@ -1562,7 +1562,7 @@ Reply ONLY with this JSON:
         model: "llama-3.1-8b-instant", 
 
         // 2. Lower max_tokens to reduce the "requested" footprint
-        max_tokens: 1024, 
+        max_tokens: 400, 
 
         // 3. Keep JSON mode
         response_format: { type: "json_object" },
