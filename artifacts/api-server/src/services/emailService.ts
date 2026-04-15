@@ -1,15 +1,3 @@
-import nodemailer from "nodemailer";
-
-function createTransporter() {
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  });
-}
-
 interface SendEmailOptions {
   to: string;
   subject: string;
@@ -18,17 +6,23 @@ interface SendEmailOptions {
 }
 
 export async function sendEmail(opts: SendEmailOptions): Promise<boolean> {
-  const transporter = createTransporter();
-  if (!transporter) return false;
+  if (!process.env.BREVO_API_KEY || !process.env.BREVO_SENDER_EMAIL) return false;
   try {
-    await transporter.sendMail({
-      from: `"Digor CRM" <${process.env.SMTP_USER}>`,
-      to: opts.to,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": process.env.BREVO_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: { name: "Digor CRM", email: process.env.BREVO_SENDER_EMAIL },
+        to: [{ email: opts.to }],
+        subject: opts.subject,
+        htmlContent: opts.html,
+        textContent: opts.text,
+      }),
     });
-    return true;
+    return res.ok;
   } catch (err) {
     console.error("[emailService] Failed to send email:", err);
     return false;

@@ -1,20 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { crmEmailSequences, crmSequenceSteps, crmSequenceLogs, crmLeads } from "@workspace/db/schema";
+import { crmEmailSequences, crmSequenceSteps, crmSequenceLogs, crmLeads, crmUsers } from "@workspace/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { crmAuth, crmAdminOnly } from "./middleware";
-import nodemailer from "nodemailer";
 
 const router = Router();
-
-function getMailer() {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  });
-}
 
 // GET /crm/sequences - list sequences for campaign
 router.get("/", crmAuth, async (req, res) => {
@@ -232,18 +222,40 @@ export async function runEmailSequenceJob() {
               .replace(/\{\{name\}\}/g, lead.sellerName)
               .replace(/\{\{address\}\}/g, lead.address || "");
 
-            // Send email
+                        // Find campaign admin email for Reply-To
+            let replyToEmail = process.env.BREVO_SENDER_EMAIL || "";
+            if (seq.campaignId) {
+              const [campaignAdmin] = await db
+                .select()
+                .from(crmUsers)
+                .where(and(eq(crmUsers.campaignId, seq.campaignId), eq(crmUsers.role, "admin")))
+                .limit(1);
+              if (campaignAdmin?.email) replyToEmail = campaignAdmin.email;
+            }
+
+            // Send email via Brevo
             let status = "sent";
             let errorMessage: string | null = null;
             try {
-              const mailer = getMailer();
-              await mailer.sendMail({
-                from: `"Digor LLC" <${process.env.SMTP_USER}>`,
-                to: lead.email!,
-                subject,
-                text: body,
-                html: body.replace(/\n/g, "<br>"),
+              const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
+                method: "POST",
+                headers: {
+                  "api-key": process.env.BREVO_API_KEY || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  sender: { name: "Digor CRM", email: process.env.BREVO_SENDER_EMAIL },
+                  to: [{ email: lead.email!, name: lead.sellerName }],
+                  replyTo: { email: replyToEmail },
+                  subject,
+                  textContent: body,
+                  htmlContent: body.replace(/\n/g, "<br>"),
+                }),
               });
+              if (!brevoRes.ok) {
+                const errText = await brevoRes.text();
+                throw new Error(errText);
+              }
             } catch (err: any) {
               status = "failed";
               errorMessage = err?.message || "Unknown error";
