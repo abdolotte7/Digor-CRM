@@ -763,8 +763,7 @@ Do not include markdown, only the raw JSON object.`;
       },
       body: JSON.stringify({
         model: process.env.AI_MODEL || "gemini-2.0-flash",
-        max_completion_tokens: 8192,
-        response_format: { type: "json_object" },
+        max_tokens: 8192,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -1069,8 +1068,7 @@ async function fetchCompsViaAI(lead: any, leadId: number, subjectProp: {
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: process.env.AI_MODEL || "gemini-2.0-flash",
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
+        max_tokens: 2048,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user",   content: userPrompt },

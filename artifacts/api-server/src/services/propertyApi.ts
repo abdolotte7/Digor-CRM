@@ -572,8 +572,7 @@ export async function estimateMarketPricePerSqft(
       },
       body: JSON.stringify({
         model: process.env.AI_MODEL || "gemini-2.0-flash",
-        max_completion_tokens: 128,
-        response_format: { type: "json_object" },
+        max_tokens: 128,
         messages: [
           { role: "system", content: "You are a real estate market data expert. Answer only with valid JSON." },
           { role: "user",   content: prompt },
