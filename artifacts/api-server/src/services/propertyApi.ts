@@ -649,7 +649,7 @@ export async function estimateMarketPricePerSqft(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
         max_tokens: 128,
         messages: [
           { role: "system", content: "You are a real estate market data expert. Answer only with valid JSON." },

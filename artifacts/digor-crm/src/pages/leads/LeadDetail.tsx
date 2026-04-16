@@ -1059,113 +1059,94 @@ function AiRepairEstimator({ leadId, onApplied }: { leadId: number; onApplied: (
   );
 }
 
-// ─── AI Deal Scorer ────────────────────────────────────────────────────────────
-function AiDealScorer({ leadId }: { leadId: number }) {
-  const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any | null>(null);
+// AI Deal Scorer Backend (Node.js/Express)
+router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
+  const id = parseInt(req.params.id as string);
+  const crmUser = (req as any).crmUser;
 
-  async function handleScore() {
-    setLoading(true);
-    setResult(null);
-    try {
-      const token = localStorage.getItem("crm_token");
-      const resp = await fetch(`/api/crm/leads/${leadId}/ai-deal-score`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
+  try {
+    // 1. Fetch Lead Data
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
 
-      // FIX 1: Robust error checking before parsing JSON
-      const isJson = resp.headers.get("content-type")?.includes("application/json");
-      if (!resp.ok) {
-        const errorData = isJson ? await resp.json() : { error: `Server Error (${resp.status})` };
-        throw new Error(errorData.error || "Scoring failed");
-      }
-
-      const data = await resp.json();
-      setResult(data);
-
-      // FIX 2: Smooth scroll to results so the user sees the score immediately
-      setTimeout(() => {
-        const el = document.getElementById(`score-result-${leadId}`);
-        el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 100);
-
-    } catch (err: any) {
-      toast({ title: "Scoring failed", description: err.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+       return res.status(403).json({ error: "Access denied" });
     }
+
+    // 2. Fetch Activity Log (Notes)
+    // Replace 'crmNotes' with your actual table name if different
+    const notes = await db.select().from(crmNotes).where(eq(crmNotes.leadId, id)).orderBy(desc(crmNotes.createdAt)).limit(10);
+    const activitySummary = notes.map(n => `[${n.createdAt?.toLocaleDateString()}]: ${n.content}`).join("\n");
+
+    const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const aiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    if (!aiBaseUrl || !aiApiKey) return res.status(503).json({ error: "AI service not configured" });
+
+    // 3. Clean Financial Data
+    const mao = lead.mao ? parseFloat(lead.mao) : null;
+    const arv = lead.arv ? parseFloat(lead.arv) : null;
+    const askingPriceRaw = lead.askingPrice || "Want an offer";
+    const askingPriceNum = parseFloat(askingPriceRaw.replace(/[^0-9.]/g, ""));
+    
+    const formattedMao = mao ? "$" + mao.toLocaleString() : "not set";
+    const formattedAsking = isNaN(askingPriceNum) ? askingPriceRaw : "$" + askingPriceNum.toLocaleString();
+    const suggestedOpening = mao ? (mao * 0.85).toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : "a discounted price";
+
+    const prompt = `You are a Real Estate Wholesale Investment Analyst. Analyze this lead for a BUYER.
+    
+    FINANCIALS:
+    - MAO (Absolute Ceiling): ${formattedMao}
+    - Asking Price: ${formattedAsking}
+    - ARV: ${arv ? "$" + arv.toLocaleString() : "Unknown"}
+
+    SELLER CONTEXT:
+    - Reason: ${lead.reasonForSelling || "Not provided"}
+    - Timeline: ${lead.howSoon || "Not provided"}
+    - Activity Log (Latest Notes):
+    ${activitySummary || "No notes available."}
+
+    STRICT SCORING RULES:
+    1. Every "score" MUST be an integer between 1 and 10.
+    2. 10 is the BEST outcome for the buyer (e.g., 10/10 risk means the deal is safe).
+    3. Never return percentages (like 60). Return the score (like 6).
+
+    Reply ONLY with this JSON structure:
+    {
+      "score": 5,
+      "grade": "A-F",
+      "verdict": "Investor summary.",
+      "profitPotential": { "score": 5, "note": "Analysis relative to ${formattedMao}" },
+      "sellerMotivation": { "score": 5, "note": "Based on reason and activity log" },
+      "dealRisk": { "score": 5, "note": "Safety assessment" },
+      "urgency": { "score": 5, "note": "Timeline analysis" },
+      "recommendation": "Suggest opening at ${suggestedOpening} and walking away at ${formattedMao}",
+      "redFlags": [],
+      "positives": []
+    }`;
+
+    const aiRes = await fetch(`${aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama-3.1-70b-versatile", // Use 70B for accuracy
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "You are a Real Estate Wholesaling Coach. Your goal is to keep purchase price below the MAO ceiling." },
+          { role: "user", content: prompt }
+        ],
+      }),
+    });
+
+    const aiJson = await aiRes.json() as any;
+    const raw = aiJson?.choices?.[0]?.message?.content || "{}";
+    res.json(JSON.parse(raw));
+
+  } catch (err) {
+    console.error("AI Error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
+});
 
-  const scoreColor = (s: number) => s >= 8 ? "text-green-400" : s >= 6 ? "text-yellow-400" : "text-red-400";
-  const gradeColor = (g: string) => g?.startsWith("A") ? "bg-green-500/20 text-green-400" : g?.startsWith("B") ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400";
-
-  return (
-    <Card className="rounded-2xl border-white/5 bg-card shadow-lg overflow-hidden">
-      <div className="bg-secondary/30 p-4 border-b border-border flex items-center gap-2">
-        <TrendingUp className="w-5 h-5 text-primary" />
-        <h2 className="font-display font-semibold">AI Deal Scorer</h2>
-        <Badge variant="secondary" className="text-xs gap-1"><Sparkles className="w-3 h-3" />AI</Badge>
-      </div>
-      <div className="p-4 space-y-4">
-        <Button className="w-full gap-2 rounded-xl" onClick={handleScore} disabled={loading}>
-          {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing Deal…</> : <><Sparkles className="w-4 h-4" /> Score This Deal</>}
-        </Button>
-
-        {result && (
-          <div id={`score-result-${leadId}`} className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-center justify-between p-4 rounded-xl bg-secondary/40 border border-white/5">
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Deal Score</p>
-                <p className={`text-4xl font-bold ${scoreColor(result.score)}`}>{result.score}<span className="text-lg text-muted-foreground">/10</span></p>
-                <p className="text-sm text-muted-foreground mt-1">{result.verdict}</p>
-              </div>
-              <Badge className={`text-2xl font-bold px-4 py-2 ${gradeColor(result.grade)}`}>{result.grade}</Badge>
-            </div>
-
-            {/* ... Rest of your UI grid and logic is perfectly fine ... */}
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: "Profit Potential", data: result.profitPotential },
-                { label: "Seller Motivation", data: result.sellerMotivation },
-                { label: "Deal Risk", data: result.dealRisk },
-                { label: "Urgency", data: result.urgency },
-              ].map(({ label, data }) => data && (
-                <div key={label} className="p-3 rounded-xl bg-secondary/30 border border-white/5">
-                  <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                  <p className={`text-lg font-bold ${scoreColor(data.score)}`}>{data.score}/10</p>
-                  <p className="text-xs text-muted-foreground mt-1 leading-tight">{data.note}</p>
-                </div>
-              ))}
-            </div>
-
-            {result.recommendation && (
-              <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
-                <p className="text-xs font-semibold text-primary mb-1">Recommendation</p>
-                <p className="text-sm italic">"{result.recommendation}"</p>
-              </div>
-            )}
-
-            {/* Positives and Red Flags lists look good! */}
-            {result.positives?.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-green-400 mb-2">Positives</p>
-                <ul className="space-y-1">{result.positives.map((p: string, i: number) => <li key={i} className="text-xs text-muted-foreground flex gap-2"><span className="text-green-400">✓</span>{p}</li>)}</ul>
-              </div>
-            )}
-            {result.redFlags?.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-red-400 mb-2">Red Flags</p>
-                <ul className="space-y-1">{result.redFlags.map((f: string, i: number) => <li key={i} className="text-xs text-muted-foreground flex gap-2"><span className="text-red-400">⚠</span>{f}</li>)}</ul>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
 
 
 // ─── AI Seller Script ──────────────────────────────────────────────────────────

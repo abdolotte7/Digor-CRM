@@ -763,7 +763,7 @@ Do not include markdown, only the raw JSON object.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
@@ -1068,7 +1068,7 @@ async function fetchCompsViaAI(lead: any, leadId: number, subjectProp: {
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
@@ -1448,54 +1448,70 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
   }
 });
 
-// ─── AI Deal Scorer (Buyer/Wholesaler Perspective) ───────────────────────────
+// ─── AI Deal Scorer (Complete Backend) ───────────────────────────
 router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
   const id = parseInt(req.params.id as string);
   const crmUser = (req as any).crmUser;
+
   try {
+    // 1. Fetch Lead
     const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
     if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+
+    // Permissions check
     if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
       res.status(403).json({ error: "Access denied" }); return;
     }
 
+    // 2. Fetch Activity Log (Notes)
+    const notes = await db.select().from(crmNotes)
+      .where(eq(crmNotes.leadId, id))
+      .orderBy(desc(crmNotes.createdAt))
+      .limit(15);
+
+    const activityLogSummary = notes.length > 0 
+      ? notes.map(n => `[${n.createdAt?.toLocaleDateString()}]: ${n.content}`).join("\n")
+      : "No recent activity notes available.";
+
+    // 3. Environment & Service Config
     const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const aiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
     if (!aiBaseUrl || !aiApiKey) { res.status(503).json({ error: "AI service not configured" }); return; }
 
+    // 4. Financial Calculations & Data Cleaning
     const arv = lead.arv ? parseFloat(lead.arv) : null;
     const mao = lead.mao ? parseFloat(lead.mao) : null;
-    const askingPrice = lead.askingPrice ? parseFloat(lead.askingPrice) : null;
-    const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : null;
 
-    // PRE-CALCULATE NUMBERS TO PREVENT AI MATH ERRORS
+    // Handle "Want an offer" or text-based prices
+    const askingPriceRaw = lead.askingPrice || "Want an offer";
+    const askingPriceNum = parseFloat(askingPriceRaw.replace(/[^0-9.]/g, ""));
+
     const formattedMao = mao ? "$" + mao.toLocaleString() : "not set";
-    const formattedAsking = askingPrice ? "$" + askingPrice.toLocaleString() : "not set";
-
-    // Calculate a target opening offer (85% of MAO) to "anchor" the AI
+    const formattedAsking = isNaN(askingPriceNum) ? askingPriceRaw : "$" + askingPriceNum.toLocaleString();
     const suggestedOpening = mao ? (mao * 0.85).toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : "a discounted price";
 
-    const reason = lead.reasonForSelling || "Not provided";
     const occupancyInfo = lead.isRental 
       ? `Currently rented ($${lead.rentalAmount}/mo) with tenant in place` 
       : (lead.occupancy || "unknown");
 
-    const prompt = `You are a Real Estate Wholesale Investment Analyst. Your job is to help the user (BUYER) negotiate a deal BELOW their MAO.
+    const prompt = `You are a Real Estate Wholesale Investment Analyst. Analyze this deal for a BUYER.
 
 FINANCIAL DATA:
 - Our MAO (Absolute Ceiling): ${formattedMao}
 - Seller Asking Price: ${formattedAsking}
-- Spread: ${mao && askingPrice ? (askingPrice - mao > 0 ? "Asking is ABOVE MAO" : "Asking is BELOW MAO") : "Unknown"}
+- ARV: ${arv ? "$" + arv.toLocaleString() : "Unknown"}
 
-NEGOTIATION STRATEGY:
-1. START LOW: Your recommended Opening Offer should be around ${suggestedOpening}.
-2. WALK AWAY: The absolute maximum you can pay is the MAO of ${formattedMao}. 
-3. LOGIC: Opening Offer must be LOWER than the Walk-Away Price. Never swap these.
-
-SELLER CONTEXT:
-- Motivation: ${reason}
+SELLER CONTEXT & ACTIVITY LOG:
+- Motivation: ${lead.reasonForSelling || "Not provided"}
 - Timeline: ${lead.howSoon || "Not provided"}
 - Occupancy: ${occupancyInfo}
+- RECENT NOTES:
+${activityLogSummary}
+
+STRICT SCORING RULES:
+1. Every "score" field MUST be an integer between 1 and 10.
+2. 10 is the BEST outcome for the buyer (Safe, Profitable, Highly Motivated). 
+3. Never use percentages (e.g., use 6 instead of 60).
 
 Reply ONLY with this JSON:
 {
@@ -1503,10 +1519,10 @@ Reply ONLY with this JSON:
   "grade": "A-F",
   "verdict": "Investor summary regarding the spread from ${formattedMao}.",
   "profitPotential": { "score": 0, "note": "Analysis of the profit spread relative to ${formattedMao}." },
-  "sellerMotivation": { "score": 0, "note": "Analysis based ONLY on: ${reason}" },
-  "dealRisk": { "score": 0, "note": "Analysis of repairs and ${occupancyInfo}" },
-  "urgency": { "score": 0, "note": "Analysis of the ${lead.howSoon} timeline" },
-  "recommendation": "Suggest opening at ${suggestedOpening} and walking away at your MAO ceiling of ${formattedMao}.",
+  "sellerMotivation": { "score": 0, "note": "Analysis based on motivation and notes." },
+  "dealRisk": { "score": 0, "note": "Analysis of repairs and ${occupancyInfo} and notes." },
+  "urgency": { "score": 0, "note": "Analysis of the timeline." },
+  "recommendation": "Suggest opening at ${suggestedOpening} and walking away at ${formattedMao}.",
   "redFlags": [],
   "positives": []
 }`;
@@ -1515,14 +1531,11 @@ Reply ONLY with this JSON:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.1-8b-instant",
-        max_tokens: 1000,
+        model: "llama-3.1-70b-versatile", // Use the 70B model for accurate math/reasoning
+        max_tokens: 1200,
         response_format: { type: "json_object" },
         messages: [
-          { 
-            role: "system", 
-            content: "You are a Real Estate Wholesaling Coach advising a buyer. Your goal is to maximize profit by keeping the purchase price below the MAO ceiling." 
-          },
+          { role: "system", content: "You are a Real Estate Wholesaling Coach. Your goal is to maximize buyer profit by keeping the purchase price below the MAO." },
           { role: "user", content: prompt },
         ],
       }),
@@ -1537,6 +1550,8 @@ Reply ONLY with this JSON:
 
     const aiJson = await aiRes.json() as any;
     const raw = aiJson?.choices?.[0]?.message?.content || "";
+
+    // Clean potential markdown or extra characters
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
 
     res.json(JSON.parse(cleaned));
@@ -1588,7 +1603,7 @@ Reply ONLY with this JSON structure:
     method: "POST",
     headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: process.env.AI_MODEL || "llama-3.1-8b-instant",
+      model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
       max_tokens: 1200,
       response_format: { type: "json_object" },
       messages: [
@@ -1650,7 +1665,7 @@ Reply ONLY with this JSON structure:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant", 
+        model: "llama-3.1-70b-versatile", 
         // FIX: Increased to 1200. 400 is too short for a letter and will break the JSON.
         max_tokens: 1200, 
         response_format: { type: "json_object" },
