@@ -1487,7 +1487,12 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
       mao: newMao,
       comps: insertedComps,
     });
-
+    } catch (err) {
+      console.error("Fetch comps poll error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+    });
+  
 // ─── AI Deal Scorer (Complete Backend) ───────────────────────────
 router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
   const id = parseInt(req.params.id as string);
@@ -1764,7 +1769,6 @@ Reply ONLY with this JSON structure:
     console.error("AI offer letter error:", err);
         res.status(500).json({ error: "Internal server error" });
   }
-} // <--- This closing brace for the 'async (req, res) =>' block is missing
-); 
+}); 
 
 export default router;
