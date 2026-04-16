@@ -5,6 +5,7 @@ import { eq, desc, ilike, and, or, sql, ne } from "drizzle-orm";
 import { crmAuth, crmAdminOnly } from "./middleware";
 import { onLeadCreated, onLeadStatusChanged } from "../../services/automation";
 import { fetchPropertyData, checkCooldown, recordFetch, runSkipTrace, checkSkipTraceCooldown, recordSkipTrace, getLastSkipTraceError, calculateAdjustedComp, calculateArvFromComps, checkFetchCompsCooldown, recordFetchComps, pollCompsExport, downloadComps} from "../../services/propertyApi";
+import { getRentcastValuation } from "../../services/rentcastApi";
 import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey } from "../../services/attomApi";
 
 // ─── In-memory comps job store ────────────────────────────────────────────────
@@ -1771,5 +1772,38 @@ Reply ONLY with this JSON structure:
         res.status(500).json({ error: "Internal server error" });
   }
 }); 
+
+router.post("/:id/rentcast-valuation", crmAuth, async (req, res) => {
+  const id = parseInt(req.params.id as string);
+  const crmUser = (req as any).crmUser;
+  try {
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+    if (!process.env.RENTCAST_API_KEY) {
+      res.status(503).json({ error: "Rentcast not configured" }); return;
+    }
+    const result = await getRentcastValuation({
+      address: lead.address,
+      city: lead.city,
+      state: lead.state,
+      zip: lead.zip,
+      propertyType: lead.propertyType,
+      beds: lead.beds,
+      baths: lead.baths ? parseFloat(lead.baths) : null,
+      sqft: lead.sqft,
+    });
+    if (!result) {
+      res.status(503).json({ error: "Rentcast returned no valuation — check address or credits" });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error("Rentcast valuation error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 export default router;
