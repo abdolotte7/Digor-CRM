@@ -1279,7 +1279,8 @@ router.post("/:id/fetch-comps", crmAuth, async (req, res) => {
 
     let rawComps;
     try {
-      rawComps = await fetchCompsViaAttom(lat, lng, radiusMiles, 8);
+     // CHANGE TO:
+rawComps = await fetchCompsViaAttom(lat, lng, radiusMiles, 8, subjectProp.sqft, lead.propertyType);
     } catch (attomErr: any) {
       console.error("[ATTOM comps] failed:", attomErr?.message);
       // ATTOM failed → fall back to AI

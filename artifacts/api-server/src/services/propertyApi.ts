@@ -604,18 +604,27 @@ export function calculateAdjustedComp(subject: SubjectProperty, comp: CompProper
     }
   }
 
-  return Math.max(0, Math.round(adjusted));
+// CHANGE TO:
+const netAdj = adjusted - comp.salePrice;
+const maxNetAdj = comp.salePrice * 0.30;  // ±30% cap (USPAP standard)
+const capped = comp.salePrice + Math.max(-maxNetAdj, Math.min(maxNetAdj, netAdj));
+return Math.max(0, Math.round(capped));
 }
 
 /**
  * Derive ARV from adjusted comp prices.
  * Uses average; if >3 comps drops highest/lowest outliers first.
  */
+// CHANGE TO:
 export function calculateArvFromComps(adjustedPrices: number[]): number | null {
-  if (adjustedPrices.length === 0) return null;
-  let prices = [...adjustedPrices].sort((a, b) => a - b);
+  let prices = [...adjustedPrices].filter(p => p > 0).sort((a, b) => a - b);
+  if (prices.length === 0) return null;
   if (prices.length > 3) prices = prices.slice(1, prices.length - 1);
-  return Math.round(prices.reduce((s, v) => s + v, 0) / prices.length);
+  // Median is more robust than average (distressed sales like the 65k house won't drag it down)
+  const mid = Math.floor(prices.length / 2);
+  return prices.length % 2 === 0
+    ? Math.round((prices[mid - 1] + prices[mid]) / 2)
+    : prices[mid];
 }
 
 /**

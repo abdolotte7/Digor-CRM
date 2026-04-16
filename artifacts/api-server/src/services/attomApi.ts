@@ -109,6 +109,8 @@ export async function fetchCompsViaAttom(
   lng: number,
   radiusMiles: number,
   maxComps = 8,
+  subjectSqft?: number | null,
+  subjectPropertyType?: string | null,
 ): Promise<AttomComp[]> {
   const data = await attomGet("/propertyapi/v1.0.0/sale/snapshot", {
     latitude: lat,
@@ -132,8 +134,25 @@ export async function fetchCompsViaAttom(
       const d = new Date(saleDateRaw);
       if (isNaN(d.getTime()) || d < TWO_YEARS_AGO) continue;
     }
+// Skip multi-family / commercial when subject is a single-family home
+const rawPropType = (sale?.summary?.proptype || "").toUpperCase();
+const subjectIsSingleFamily = !subjectPropertyType ||
+  ["single", "sfr", "residential"].some(t => subjectPropertyType.toLowerCase().includes(t));
 
-    const addr = sale?.address;
+if (subjectIsSingleFamily && rawPropType) {
+  const INCOMPATIBLE = ["MULTI", "DUPLEX", "TRIPLEX", "QUADRUPLEX", "COMMERCIAL", "APARTMENT"];
+  if (INCOMPATIBLE.some(m => rawPropType.includes(m))) continue;
+}
+
+// Skip comps where sqft is more than 75% bigger or 43% smaller than subject
+// (ATTOM universalsize on a quadruplex = total building, not per-unit — this filters that out)
+const compSqft: number | undefined = sale?.building?.size?.universalsize;
+if (subjectSqft && compSqft) {
+  const ratio = compSqft / subjectSqft;
+  if (ratio > 1.75 || ratio < 0.57) continue;
+}
+    const addr 
+      = sale?.address;
     const fullAddr = [addr?.line1, addr?.locality, addr?.countrySubd]
       .filter(Boolean).join(", ");
 
