@@ -763,7 +763,7 @@ Do not include markdown, only the raw JSON object.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
+        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
@@ -1086,7 +1086,7 @@ async function fetchCompsViaAI(lead: any, leadId: number, subjectProp: {
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
+        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
@@ -1576,7 +1576,7 @@ Reply ONLY with this JSON:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.1-70b-versatile", // Use the 70B model for accurate math/reasoning
+        model: "llama-3.3-70b-versatile", // Use the 70B model for accurate math/reasoning
         max_tokens: 1200,
         response_format: { type: "json_object" },
         messages: [
@@ -1664,7 +1664,7 @@ Reply ONLY with this JSON structure:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.1-70b-versatile",
+        model: "llama-3.3-70b-versatile",
         max_tokens: 1200,
         response_format: { type: "json_object" },
         messages: [
@@ -1742,7 +1742,7 @@ Reply ONLY with this JSON structure:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.1-70b-versatile", 
+        model: "llama-3.3-70b-versatile", 
         // FIX: Increased to 1200. 400 is too short for a letter and will break the JSON.
         max_tokens: 1200, 
         response_format: { type: "json_object" },
