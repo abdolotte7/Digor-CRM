@@ -1059,12 +1059,7 @@ function AiRepairEstimator({ leadId, onApplied }: { leadId: number; onApplied: (
   );
 }
 
-import React, { useState } from 'react';
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, Sparkles, Loader2 } from "lucide-react";
+
 
 function AiDealScorer({ leadId }: { leadId: number }) {
   const { toast } = useToast();
