@@ -182,20 +182,25 @@ export async function fetchAttomAvm(
   cityStateZip: string,
 ): Promise<{ value: number; low: number; high: number; confidence: number } | null> {
   try {
-    const data = await attomGet("/attomavm/detail", {
+    // ✅ Use the Property API endpoint, not the legacy one
+    const data = await attomGet("/propertyapi/v1.0.0/avm/detail", {
       address1: street,
       address2: cityStateZip,
-    });
+    }); 
+
     const avm = data?.property?.[0]?.avm;
     if (!avm?.amount?.value) return null;
+
     return {
       value:      Math.round(avm.amount.value),
       low:        Math.round(avm.amount.low   ?? avm.amount.value),
       high:       Math.round(avm.amount.high  ?? avm.amount.value),
-      confidence: avm.indicatorCode ?? 0,
+      // ✅ Use confidenceScore (numeric) instead of indicatorCode (categorical)
+      confidence: avm.confidenceScore ?? 0,
     };
   } catch (err: any) {
-    logger.warn({ err: err?.message }, "[ATTOM] fetchAttomAvm failed");
+    // ✅ Log the full error object for better debugging
+    logger.warn({ err }, "[ATTOM] fetchAttomAvm failed");
     return null;
   }
 }
