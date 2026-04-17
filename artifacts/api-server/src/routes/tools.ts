@@ -13,7 +13,7 @@ import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 import Papa from "papaparse";
 import { estimateMarketPricePerSqft, ADJUSTMENT_FACTORS } from "../services/propertyApi";
-import { attomGet, hasAttomKey } from "../services/attomApi";
+import { attomGet, hasAttomKey, fetchAttomAvm } from "../services/attomApi";
 
 const router: Router = Router();
 
@@ -48,13 +48,12 @@ const _depletedKeys = new Set<string>();
 function getNextPropertyApiKey(): string | null {
   const keys = getPropertyApiKeys();
   if (!keys.length) return null;
-  // Try each key in round-robin order, skipping depleted ones
   for (let attempt = 0; attempt < keys.length; attempt++) {
     const key = keys[_papiKeyIndex % keys.length]!;
     _papiKeyIndex = (_papiKeyIndex + 1) % keys.length;
     if (!_depletedKeys.has(key)) return key;
   }
-  return null; // All keys depleted
+  return null;
 }
 
 /** Batch skip trace — up to 50 lookups per call. Returns map of uid → result.
@@ -69,7 +68,6 @@ async function skipTraceBatch(
         uid: l.uid,
         address: { street: l.street, city: l.city, state: l.state, zip: l.zip },
       };
-      // Providing name saves 1 credit (1 vs 2 per lookup)
       if (l.ownerName) {
         const parts = l.ownerName.trim().split(/\s+/);
         entry.name = { first: parts[0] || "", last: parts.slice(1).join(" ") || "" };
@@ -81,7 +79,6 @@ async function skipTraceBatch(
   const allKeys = getPropertyApiKeys();
   let lastError = "";
 
-  // Try each key until one works or all are depleted
   for (let attempt = 0; attempt < allKeys.length; attempt++) {
     const key = getNextPropertyApiKey();
     if (!key) throw new Error("All PropertyAPI keys are depleted");
@@ -99,14 +96,13 @@ async function skipTraceBatch(
         _depletedKeys.add(key);
         logger.warn({ key: key.slice(-8) }, "PropertyAPI key depleted — rotating to next key");
         lastError = text.slice(0, 200);
-        continue; // Try next key
+        continue;
       }
       throw new Error(`PropertyAPI skip-trace ${res.status}: ${text.slice(0, 200)}`);
     }
 
     const json = await res.json() as any;
 
-    // PropertyAPI sometimes returns status:error even with 200
     if (json.status === "error") {
       const isDepletedError = (json.error || "").includes("Insufficient credits") || (json.error || "").includes("insufficient");
       if (isDepletedError) {
@@ -193,14 +189,9 @@ const STATE_ABBR_TO_FIPS: Record<string, string> = {
   SC:"45",SD:"46",TN:"47",TX:"48",UT:"49",VT:"50",VA:"51",WA:"53",WV:"54",WI:"55",WY:"56",
 };
 
-// In-memory cache: "County Name|ST" → ATTOM geoid string "CO{fips}"
 const _countyGeoIdCache = new Map<string, string>();
-// In-memory cache: "ST" → array of ATTOM county geoids
 const _stateCountiesCache = new Map<string, string[]>();
 
-/**
- * Fetch all census rows for a state. Shared between county resolver and state→counties.
- */
 async function fetchStateCensusRows(stateAbbr: string): Promise<string[][] | null> {
   const stateFips = STATE_ABBR_TO_FIPS[stateAbbr.toUpperCase()];
   if (!stateFips) return null;
@@ -212,10 +203,6 @@ async function fetchStateCensusRows(stateAbbr: string): Promise<string[][] | nul
   } catch { return null; }
 }
 
-/**
- * Resolve all county geoids for a state abbreviation.
- * Returns array like ["CO24001", "CO24003", ...] for MD.
- */
 async function resolveStateCounties(stateAbbr: string): Promise<string[]> {
   const key = stateAbbr.toUpperCase();
   if (_stateCountiesCache.has(key)) return _stateCountiesCache.get(key)!;
@@ -233,11 +220,6 @@ async function resolveStateCounties(stateAbbr: string): Promise<string[]> {
   return geoids;
 }
 
-/**
- * Resolve "County Name, ST" → ATTOM geoid string like "CO24031".
- * Uses the US Census Bureau API (free, no key needed).
- * Results are cached in-memory for the lifetime of the process.
- */
 async function resolveCountyGeoid(countyName: string, stateAbbr: string): Promise<string | null> {
   const cacheKey = `${countyName.toLowerCase()}|${stateAbbr.toUpperCase()}`;
   if (_countyGeoIdCache.has(cacheKey)) return _countyGeoIdCache.get(cacheKey)!;
@@ -338,14 +320,13 @@ router.get("/tools/skip-trace/jobs", requirePin, (_req, res) => {
 });
 
 router.get("/tools/skip-trace/status/:jobId", requirePin, (req, res) => {
-  const job = skipTraceJobs.get(req.params.jobId!);
+  const job = skipTraceJobs.get(req.params.jobId as string);
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   const { resultRows: _r, ...safe } = job;
   res.json(safe);
 });
 
 router.post("/tools/skip-trace/upload", requirePin, async (req: any, res) => {
-  // Accept pre-parsed JSON records from the frontend (CSV/XLSX parsed client-side)
   const body = req.body as { records?: Record<string, string>[], filename?: string };
   if (!body?.records || !Array.isArray(body.records) || body.records.length === 0) {
     res.status(400).json({ error: "No records found. Please check your file has data rows." });
@@ -361,7 +342,6 @@ router.post("/tools/skip-trace/upload", requirePin, async (req: any, res) => {
   };
   skipTraceJobs.set(jobId, job);
 
-  // Background processing with batched skip trace
   setImmediate(async () => {
     job.status = "running";
     job.startedAt = new Date().toISOString();
@@ -376,8 +356,6 @@ router.post("/tools/skip-trace/upload", requirePin, async (req: any, res) => {
     const zipCol = find(["zip", "postal"]);
     const ownerCol = find(["owner", "name"]);
 
-    // Detect combined address column: "120 W 3RD ST,TULSA,OK 74103"
-    // Pattern: STREET,CITY,ST ZIP  or  STREET,CITY,ST,ZIP
     const COMBINED_RE = /^(.+?),\s*([^,]+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/;
     const COMBINED_4_RE = /^(.+?),\s*([^,]+?),\s*([A-Za-z]{2}),\s*(\d{5}(?:-\d{4})?)$/;
     let combinedCol = "";
@@ -393,13 +371,11 @@ router.post("/tools/skip-trace/upload", requirePin, async (req: any, res) => {
     }
 
     function parseRow(row: Record<string, string>) {
-      // Combined col wins if explicitly detected
       const srcCol = combinedCol || (streetCol && !cityCol && !zipCol ? streetCol : "");
       if (srcCol) {
         const val = (row[srcCol] || "").trim();
         const m = val.match(COMBINED_RE) || val.match(COMBINED_4_RE);
         if (m) return { street: m[1]!.trim(), city: m[2]!.trim(), state: m[3]!.trim().toUpperCase(), zip: m[4]!.trim() };
-        // Value didn't match combined pattern — treat as plain street only (will be skipped due to missing city/zip)
         return { street: val, city: "", state: "", zip: "" };
       }
       return {
@@ -448,7 +424,7 @@ router.post("/tools/skip-trace/upload", requirePin, async (req: any, res) => {
           job.progressPercent = Math.round((job.processed / job.totalRecords) * 100);
         }
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise<void>(resolve => setTimeout(resolve, 300));
     }
 
     job.status = "completed";
@@ -459,7 +435,7 @@ router.post("/tools/skip-trace/upload", requirePin, async (req: any, res) => {
 });
 
 router.get("/tools/skip-trace/download/:jobId", requirePin, (req, res) => {
-  const job = skipTraceJobs.get(req.params.jobId!);
+  const job = skipTraceJobs.get(req.params.jobId as string);
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   if (job.status !== "completed") { res.status(400).json({ error: "Job not complete" }); return; }
   const csv = Papa.unparse(job.resultRows);
@@ -469,10 +445,7 @@ router.get("/tools/skip-trace/download/:jobId", requirePin, (req, res) => {
 });
 
 // ─── Distressed Property Finder ───────────────────────────────────────────────
-// Uses ATTOM property/detailmortgageowner — returns owner name, absentee status, mortgage, and property info
 
-// Categories that can be filtered server-side using data returned by ATTOM detailmortgageowner (ZIP-based)
-// Note: high_equity and high_ltv require assessed value which is NOT in the current ATTOM subscription
 const MORTGAGE_FILTER_CATEGORIES = new Set(["free_clear", "absentee_owner"]);
 
 router.get("/tools/distressed/jobs", requirePin, (_req, res) => {
@@ -483,7 +456,7 @@ router.get("/tools/distressed/jobs", requirePin, (_req, res) => {
 });
 
 router.get("/tools/distressed/status/:jobId", requirePin, (req, res) => {
-  const job = distressedJobs.get(req.params.jobId!);
+  const job = distressedJobs.get(req.params.jobId as string);
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   const { resultRows: _r, ...safe } = job;
   res.json(safe);
@@ -579,7 +552,6 @@ router.post("/tools/distressed/search", requirePin, async (req, res) => {
     return;
   }
 
-  // Which mortgage-based categories are selected (all must pass for multi-category)
   const activeMortgageFilters = categories.filter(c => MORTGAGE_FILTER_CATEGORIES.has(c));
   const hasOnlyMortgageFilters = activeMortgageFilters.length > 0 && activeMortgageFilters.length === categories.length;
 
@@ -623,18 +595,14 @@ router.post("/tools/distressed/search", requirePin, async (req, res) => {
             const mortgage = prop?.mortgage;
             const assessment = prop?.assessment;
 
-            // Owner fields
             const absenteeStatus = owner?.absenteeownerstatus;
             const isAbsentee = absenteeStatus === "A";
 
-            // Mortgage fields
             const mortgageAmt = mortgage?.amount ? Number(mortgage.amount) : null;
             const mortgageDate = mortgage?.date || "";
             const mortgageRateType = mortgage?.interestratetype || "";
             const mortgageLender = mortgage?.lender?.lastname?.trim() || "";
 
-            // Assessment / value for LTV calculation
-            // ATTOM uses assessment.assessed.assdttlvalue or assessment.market.mktttlvalue
             const assessedVal: number | null =
               assessment?.assessed?.assdttlvalue
               ?? assessment?.assessed?.totvalue
@@ -642,12 +610,9 @@ router.post("/tools/distressed/search", requirePin, async (req, res) => {
               ?? null;
             const assessedValNum = assessedVal ? Number(assessedVal) : null;
 
-            // LTV: mortgage amount / assessed value × 100
             const ltvPct = (mortgageAmt && assessedValNum && assessedValNum > 0)
               ? Math.round((mortgageAmt / assessedValNum) * 100) : null;
 
-            // ── Server-side filters (absentee_owner, free_clear) ──────────────
-            // Applied when ALL selected categories are filterable
             if (hasOnlyMortgageFilters) {
               let passes = true;
               for (const cat of activeMortgageFilters) {
@@ -699,11 +664,11 @@ router.post("/tools/distressed/search", requirePin, async (req, res) => {
           logger.warn({ err, location: label }, "Distressed: ATTOM detailmortgageowner failed");
           break;
         }
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise<void>(resolve => setTimeout(resolve, 200));
       }
 
       job.locationsProcessed++;
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise<void>(resolve => setTimeout(resolve, 300));
     }
 
     job.status = "completed";
@@ -713,7 +678,7 @@ router.post("/tools/distressed/search", requirePin, async (req, res) => {
 });
 
 router.get("/tools/distressed/download/:jobId", requirePin, (req, res) => {
-  const job = distressedJobs.get(req.params.jobId!);
+  const job = distressedJobs.get(req.params.jobId as string);
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   if (job.status !== "completed") { res.status(400).json({ error: "Job not complete" }); return; }
   const csv = Papa.unparse(job.resultRows);
@@ -723,14 +688,14 @@ router.get("/tools/distressed/download/:jobId", requirePin, (req, res) => {
 });
 
 router.post("/tools/distressed/enrich/:jobId", requirePin, async (req, res) => {
-  const job = distressedJobs.get(req.params.jobId!);
+  const job = distressedJobs.get(req.params.jobId as string);
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   if (job.status !== "completed" || !job.resultRows.length) { res.status(400).json({ error: "Job not complete or no results" }); return; }
   if (!getPropertyApiKeys().length) { res.status(503).json({ error: "PropertyAPI keys not configured" }); return; }
 
   const enrichJobId = randomUUID();
   const enrichJob: EnrichJob = {
-    enrichJobId, parentJobId: req.params.jobId!,
+    enrichJobId, parentJobId: req.params.jobId as string,
     status: "running", total: job.resultRows.length, processed: 0, resultRows: [],
   };
   enrichJobs.set(enrichJobId, enrichJob);
@@ -765,7 +730,7 @@ router.post("/tools/distressed/enrich/:jobId", requirePin, async (req, res) => {
           enrichJob.processed++;
         }
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise<void>(resolve => setTimeout(resolve, 300));
     }
     enrichJob.status = "completed";
   });
@@ -774,14 +739,14 @@ router.post("/tools/distressed/enrich/:jobId", requirePin, async (req, res) => {
 });
 
 router.get("/tools/distressed/enrich-status/:enrichJobId", requirePin, (req, res) => {
-  const job = enrichJobs.get(req.params.enrichJobId!);
+  const job = enrichJobs.get(req.params.enrichJobId as string);
   if (!job) { res.status(404).json({ error: "Enrich job not found" }); return; }
   const { resultRows: _r, ...safe } = job;
   res.json(safe);
 });
 
 router.get("/tools/distressed/download-enriched/:enrichJobId", requirePin, (req, res) => {
-  const job = enrichJobs.get(req.params.enrichJobId!);
+  const job = enrichJobs.get(req.params.enrichJobId as string);
   if (!job) { res.status(404).json({ error: "Enrich job not found" }); return; }
   if (job.status !== "completed") { res.status(400).json({ error: "Enrichment not complete" }); return; }
   const csv = Papa.unparse(job.resultRows);
@@ -807,12 +772,10 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
   };
 
   if (!street) { res.status(400).json({ error: "Street address is required" }); return; }
-
   if (!getPropertyApiKeys().length) { res.status(503).json({ error: "PropertyAPI keys not configured" }); return; }
   if (!hasAttomKey()) { res.status(503).json({ error: "ATTOM_API_KEY not configured" }); return; }
 
   try {
-    // Step 1: Get subject property details via PropertyAPI (geocoding + beds/baths/year)
     const fullAddress = [street, city, state, zip].filter(Boolean).join(" ");
     const subject = await lookupProperty(fullAddress);
 
@@ -825,10 +788,7 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
     const subjectBaths = subject.baths ?? 2;
     const subjectYear = subject.yearBuilt ?? 2000;
 
-    // Step 1b: Look up subject sqft via ATTOM property/snapshot so we use the same
-    // universalsize (heated living area) definition that ATTOM comps use.
-    // This ensures subject and comps sqft are on the same scale — no apples-to-oranges
-    // adjustment inflation. Fall back to PropertyAPI sqft if ATTOM doesn't return one.
+    // Step 1b: Look up subject sqft via ATTOM property/snapshot — same universalsize scale as comps
     let subjectSqft: number = subject.sqft ?? 1500;
     let subjectSqftSource = "PropertyAPI";
     try {
@@ -847,7 +807,12 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
       // non-fatal — keep PropertyAPI sqft
     }
 
-    // Step 2: Get comparable sales via ATTOM sale/snapshot (lat/lon radius)
+    // Detect subject property type for comp filtering
+    const subjectPropTypeRaw = (subject.propertyType || "").toUpperCase();
+    const subjectIsSingleFamily = !subjectPropTypeRaw ||
+      ["single", "sfr", "residential"].some(t => subjectPropTypeRaw.toLowerCase().includes(t));
+
+    // Step 2: Get comparable sales via ATTOM sale/snapshot
     const compsData = await attomGet("/propertyapi/v1.0.0/sale/snapshot", {
       latitude: subject.latitude,
       longitude: subject.longitude,
@@ -857,30 +822,25 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
 
     const allSales = compsData?.property || [];
 
-    // Step 3: Adjust comps for subject vs comp differences
     const PRICE_PER_YEAR = 150;
     const PRICE_PER_BATH = 7500;
-    const ANNUAL_APPRECIATION_RATE = 0.03; // 3% per year, conservative market-neutral default
+    const ANNUAL_APPRECIATION_RATE = 0.03;
 
-    // Derive price-per-sqft from the actual comp data (median of salePrice/sqft).
-    // This ensures the adjustment rate reflects the real market for this specific area,
-    // rather than a one-size-fits-all constant that will be wrong in most markets.
+    // Derive price-per-sqft from actual comp data (median of salePrice/sqft)
     const sqftRates = allSales
-      .map((s: any) => {
-        const price = s?.sale?.amount?.saleamt;
-        const sqft  = s?.building?.size?.universalsize;
-        return (price > 0 && sqft > 0) ? price / sqft : null;
-      })
-      .filter((r): r is number => r !== null)
-      .sort((a, b) => a - b);
+  .map((s: any): number | null => {
+    const price = s?.sale?.amount?.saleamt;
+    const sqft  = s?.building?.size?.universalsize;
+    return (price && sqft) ? price / sqft : null;
+  })
+  .filter((r: number | null): r is number => r !== null)
+  .sort((a: number, b: number) => a - b);
 
-    // When comp data doesn't provide enough sqft info, ask the AI for a market-specific rate.
-    // This avoids any hardcoded constant that would be wrong for most markets.
+
     const PRICE_PER_SQFT: number = sqftRates.length > 0
-      ? sqftRates[Math.floor(sqftRates.length / 2)] // median from actual comps
+      ? sqftRates[Math.floor(sqftRates.length / 2)]!
       : (await estimateMarketPricePerSqft(city, state, zip)) ?? ADJUSTMENT_FACTORS.sqft;
 
-    // Helper: build comp list filtered by date cutoff
     function buildComps(sales: any[], lookbackMonths: number): any[] {
       const result: any[] = [];
       const cutoff = new Date();
@@ -896,7 +856,23 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
           if (date < cutoff) continue;
         }
 
+        // Skip multi-family / commercial comps when subject is a single-family home
+        // ATTOM universalsize on a quadruplex = total building sqft (all units combined)
+        // which makes it appear 4-5x larger than our subject, destroying ARV accuracy
+        const rawPropType = (sale?.summary?.proptype || "").toUpperCase();
+        if (subjectIsSingleFamily) {
+          const INCOMPATIBLE = ["MULTI", "DUPLEX", "TRIPLEX", "QUADRUPLEX", "COMMERCIAL", "APARTMENT"];
+          if (INCOMPATIBLE.some(m => rawPropType.includes(m))) continue;
+        }
+
+        // Skip comps where sqft is more than 75% bigger or 43% smaller than subject
+        // Catches multi-family that slips through proptype filter (universalsize = total building)
         const compSqft = sale?.building?.size?.universalsize || 0;
+        if (subjectSqft && compSqft) {
+          const ratio = compSqft / subjectSqft;
+          if (ratio > 1.75 || ratio < 0.57) continue;
+        }
+
         const compBaths = sale?.building?.rooms?.bathstotal || 0;
         const compYear = sale?.summary?.yearbuilt || subjectYear;
 
@@ -904,7 +880,6 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
         const bathAdj = (subjectBaths - compBaths) * PRICE_PER_BATH;
         const yearAdj = (subjectYear - compYear) * PRICE_PER_YEAR;
 
-        // Time adjustment: bring older comp value up to today's market
         let timeAdj = 0;
         if (saleDate) {
           const soldMs = new Date(saleDate).getTime();
@@ -920,7 +895,6 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
         const compLat = parseFloat(sale?.location?.latitude || "0");
         const compLon = parseFloat(sale?.location?.longitude || "0");
 
-        // Haversine distance
         const dLat = ((subject.latitude! - compLat) * Math.PI) / 180;
         const dLon = ((subject.longitude! - compLon) * Math.PI) / 180;
         const aHav = Math.sin(dLat / 2) ** 2 +
@@ -932,6 +906,7 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
         const soldDateStr = saleDate
           ? new Date(saleDate).toISOString().split("T")[0]
           : null;
+
         result.push({
           address: `${addr?.line1 || ""}, ${addr?.locality || ""}, ${addr?.countrySubd || ""}`.trim().replace(/^,\s*|,\s*$/g, ""),
           beds: subjectBeds,
@@ -949,7 +924,6 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
       return result;
     }
 
-    // Try progressively wider lookback windows
     let comps = buildComps(allSales, 24);
     if (!comps.length) comps = buildComps(allSales, 48);
     if (!comps.length) comps = buildComps(allSales, 84);
@@ -964,8 +938,13 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
     const mao = Math.round(arv * 0.80 - repairCost);
     const maxOffer = Math.round(arv * 0.75 - repairCost);
 
+    // Fetch ATTOM AVM as a secondary valuation signal (non-blocking — null if it fails)
+    const address2 = [city, state, zip].filter(Boolean).join(" ");
+    const attomAvm = await fetchAttomAvm(street, address2).catch(() => null);
+
     res.json({
       arv, arvPricePerSqft, mao, maxOffer, repairCost,
+      attomAvm,
       compsUsed: comps.length,
       comps,
       subjectSqftSource,
@@ -1005,8 +984,6 @@ router.post("/tools/property-lookup/search", requirePin, async (req, res) => {
 
   try {
     const fullAddress = [street, city, state, zip].filter(Boolean).join(" ");
-
-    // Run PropertyAPI lookup, ATTOM mortgage lookup, and skip trace in parallel
     const address2 = [city, state, zip].filter(Boolean).join(" ");
     const [propData, attomResult, skipTraceResult] = await Promise.allSettled([
       lookupProperty(fullAddress),
@@ -1023,7 +1000,6 @@ router.post("/tools/property-lookup/search", requirePin, async (req, res) => {
     const prop = propData.status === "fulfilled" ? propData.value : null;
     if (!prop) throw (propData as PromiseRejectedResult).reason;
 
-    // Extract ATTOM mortgage + owner data
     const attomProp = attomResult.status === "fulfilled" ? attomResult.value?.property?.[0] : null;
     const attomOwner = attomProp?.owner;
     const attomMortgage = attomProp?.mortgage;
@@ -1046,7 +1022,6 @@ router.post("/tools/property-lookup/search", requirePin, async (req, res) => {
     const mortgageTerm = attomMortgage?.term ? Number(attomMortgage.term) : null;
     const mortgageDueDate = attomMortgage?.duedate || null;
 
-    // Skip trace result for phone/email
     const stData = skipTraceResult.status === "fulfilled" ? skipTraceResult.value["lookup"] : null;
     const phones = stData?.phones || [];
     const emails = stData?.emails || [];
@@ -1055,7 +1030,6 @@ router.post("/tools/property-lookup/search", requirePin, async (req, res) => {
     const ownerName = owner1Name || ownerFromST || prop.ownerName || null;
     const avm = prop.avm;
     const lastSalePrice = prop.lastSalePrice;
-    // Use mortgage amount as proxy for balance (original mortgage amount is closest we have)
     const mortgageBalance = mortgageAmount || null;
     const estimatedEquity = avm && mortgageBalance ? Math.round(avm - mortgageBalance) : (avm && lastSalePrice ? Math.round(avm - lastSalePrice) : null);
     const equityPercent = avm && estimatedEquity !== null ? +((estimatedEquity / avm) * 100).toFixed(1) : null;
