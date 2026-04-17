@@ -157,3 +157,32 @@ export async function fetchCompsViaAttom(
 
   return comps;
 }
+
+/**
+ * Fetch ATTOM automated valuation model (AVM) for a single property.
+ * Endpoint: /attomavm/detail
+ * Returns { value, low, high, confidence } or throws on failure.
+ */
+export async function fetchAttomAvm(
+  street: string,
+  address2: string,
+): Promise<{ value: number; low: number; high: number; confidence: number }> {
+  const data = await attomGet("/attomavm/detail", {
+    address1: street,
+    address2,
+  });
+
+  const prop = data?.property?.[0];
+  const avm = prop?.avm;
+  const value = avm?.amount?.value ?? avm?.amount?.saleamt ?? 0;
+
+  if (!value || value <= 0) {
+    throw new Error("ATTOM AVM returned no value for this address");
+  }
+
+  const low = avm?.amount?.low ?? Math.round(value * 0.9);
+  const high = avm?.amount?.high ?? Math.round(value * 1.1);
+  const confidence = avm?.confidence?.score ?? avm?.condition?.confidencescore ?? 0;
+
+  return { value: Math.round(value), low: Math.round(low), high: Math.round(high), confidence };
+}
