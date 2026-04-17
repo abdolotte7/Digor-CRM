@@ -176,3 +176,26 @@ if (subjectSqft && compSqft) {
 
   return comps;
 }
+
+export async function fetchAttomAvm(
+  street: string,
+  cityStateZip: string,
+): Promise<{ value: number; low: number; high: number; confidence: number } | null> {
+  try {
+    const data = await attomGet("/attomavm/detail", {
+      address1: street,
+      address2: cityStateZip,
+    });
+    const avm = data?.property?.[0]?.avm;
+    if (!avm?.amount?.value) return null;
+    return {
+      value:      Math.round(avm.amount.value),
+      low:        Math.round(avm.amount.low   ?? avm.amount.value),
+      high:       Math.round(avm.amount.high  ?? avm.amount.value),
+      confidence: avm.indicatorCode ?? 0,
+    };
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "[ATTOM] fetchAttomAvm failed");
+    return null;
+  }
+}

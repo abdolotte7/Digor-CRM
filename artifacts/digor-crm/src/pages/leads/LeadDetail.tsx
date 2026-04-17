@@ -534,6 +534,9 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
 
   const [rentcastLoading, setRentcastLoading] = useState(false);
   const [rentcastData, setRentcastData] = useState<{ price: number; low: number; high: number } | null>(null);
+
+  const [attomAvmLoading, setAttomAvmLoading] = useState(false);
+  const [attomAvmData, setAttomAvmData] = useState<{ value: number; low: number; high: number; confidence: number } | null>(null);
   
   async function handleRentcastValuation() {
     setRentcastLoading(true);
@@ -554,6 +557,25 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
     }
   }
 
+  async function handleAttomAvm() {
+    setAttomAvmLoading(true);
+    setAttomAvmData(null);
+    try {
+      const token = localStorage.getItem("crm_token");
+      const resp = await fetch(`/api/crm/leads/${leadId}/attom-avm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "ATTOM AVM failed");
+      setAttomAvmData(data);
+    } catch (err: any) {
+      toast({ title: "ATTOM AVM failed", description: err.message, variant: "destructive" });
+    } finally {
+      setAttomAvmLoading(false);
+    }
+  }
+  
   async function handleFetchComps() {
     if (fetchingComps || compsPolling) return;
     setFetchingComps(true);
@@ -735,6 +757,28 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
     {rentcastLoading ? <><Loader2 className="w-3 h-3 animate-spin" /> Fetching…</> : "Get Rentcast Estimate"}
   </Button>
 </div>
+
+      <div className="mx-4 mt-3 p-3 rounded-xl bg-secondary/20 border border-border flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground">ATTOM AVM</p>
+          {attomAvmData ? (
+            <p className="text-sm font-bold text-primary">
+              {fmt$(attomAvmData.value)}
+              <span className="text-xs font-normal text-muted-foreground ml-2">
+                Range: {fmt$(attomAvmData.low)} – {fmt$(attomAvmData.high)}
+                {" · "}Confidence: {attomAvmData.confidence}%
+              </span>
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Not fetched yet</p>
+          )}
+        </div>
+        <Button size="sm" variant="outline" className="rounded-xl gap-2 shrink-0"
+          onClick={handleAttomAvm} disabled={attomAvmLoading}>
+          {attomAvmLoading ? <><Loader2 className="w-3 h-3 animate-spin" /> Fetching…</> : "Get ATTOM AVM"}
+        </Button>
+      </div>
+      
       {/* ARV summary banner */}
       {(avgAdjusted || arv) && (
         <div className="mx-4 mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1689,7 +1733,7 @@ export default function LeadDetail() {
     if (shouldLoad) loadStoredMessages();
     const interval = setInterval(() => {
       if (leadId && (isSuperAdmin || campaignData?.dialerEnabled)) loadStoredMessages();
-    }, 8000);
+    }, 80000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, opSelectedId, lead?.phone, isSuperAdmin, campaignData?.dialerEnabled]);

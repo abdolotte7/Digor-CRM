@@ -6,7 +6,7 @@ import { crmAuth, crmAdminOnly } from "./middleware";
 import { onLeadCreated, onLeadStatusChanged } from "../../services/automation";
 import { fetchPropertyData, checkCooldown, recordFetch, runSkipTrace, checkSkipTraceCooldown, recordSkipTrace, getLastSkipTraceError, calculateAdjustedComp, calculateArvFromComps, checkFetchCompsCooldown, recordFetchComps, pollCompsExport, downloadComps} from "../../services/propertyApi";
 import { getRentcastValuation } from "../../services/rentcastApi";
-import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey } from "../../services/attomApi";
+import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey, fetchAttomAvm } from "../../services/attomApi";
 
 // ─── In-memory comps job store ────────────────────────────────────────────────
 interface CompsJob {
@@ -1803,6 +1803,31 @@ router.post("/:id/rentcast-valuation", crmAuth, async (req, res) => {
   } catch (err) {
     console.error("Rentcast valuation error:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── POST /:id/attom-avm ─────────────────────────────────────────────────────
+router.post("/:id/attom-avm", crmAuth, async (req, res) => {
+  try {
+    const leadId = Number(req.params.id);
+    if (!leadId) { res.status(400).json({ error: "Invalid lead ID" }); return; }
+
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, leadId)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+if (!lead.address) { res.status(400).json({ error: "Lead has no address" }); return; }
+    const cityStateZip = [lead.city, lead.state, lead.zip].filter(Boolean).join(" ");
+    const result = await fetchAttomAvm(lead.address, cityStateZip);
+
+
+    if (!result) {
+      res.status(502).json({ error: "ATTOM AVM returned no value for this address" });
+      return;
+    }
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("[ATTOM AVM route]", err);
+    res.status(500).json({ error: err?.message || "Internal server error" });
   }
 });
 
