@@ -45,11 +45,10 @@ export default function ArvCalculator() {
   const { data: config } = useArvConfig();
   const calculateArv = useCalculateArv();
   const calculateManual = useCalculateManualArv();
-  
+
   const [activeTab, setActiveTab] = useState("auto");
   const [result, setResult] = useState<any>(null);
 
-  // Auto Form State
   const [autoForm, setAutoForm] = useState({
     street: "", city: "", state: "", zip: "",
     repairCost: "15000", maxComps: "5", miles: "0.5", excludeDistressed: true
@@ -63,7 +62,7 @@ export default function ArvCalculator() {
     }
   };
 
-  const handleAutoSubmit = (e: React.FormEvent) => {
+  const handleAutoSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     calculateArv.mutate({
       ...autoForm,
@@ -192,6 +191,37 @@ export default function ArvCalculator() {
                 </Card>
               </div>
 
+              {/* ATTOM AVM secondary valuation */}
+              {result.attomAvm && (
+                <Card className="border-blue-500/20 bg-blue-500/5">
+                  <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">ATTOM AVM — Secondary Valuation</p>
+                      <p className="text-2xl font-bold text-foreground">{formatCurrency(result.attomAvm.value)}</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        Range: {formatCurrency(result.attomAvm.low)} – {formatCurrency(result.attomAvm.high)}
+                        {" · "}
+                        <span className={result.attomAvm.confidence >= 80 ? "text-green-500" : result.attomAvm.confidence >= 60 ? "text-yellow-500" : "text-red-400"}>
+                          Confidence: {result.attomAvm.confidence}%
+                        </span>
+                      </p>
+                    </div>
+                    <div className="text-right text-sm text-muted-foreground">
+                      <p>vs Comp-Based ARV</p>
+                      {(() => {
+                        const diff = result.attomAvm.value - result.arv;
+                        const pct = ((diff / result.arv) * 100).toFixed(1);
+                        return (
+                          <p className={`font-semibold text-base ${diff >= 0 ? "text-green-500" : "text-red-400"}`}>
+                            {diff >= 0 ? "+" : ""}{formatCurrency(diff)} ({diff >= 0 ? "+" : ""}{pct}%)
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Data source note */}
               <div className={`text-xs bg-muted/30 border rounded-lg px-3 py-2 flex gap-2 items-start ${result.subjectSqftSource?.includes("ATTOM") ? "border-green-500/20 text-green-400/80" : "border-yellow-500/20 text-yellow-400/80"}`}>
                 {result.subjectSqftSource?.includes("ATTOM") ? (
@@ -211,6 +241,7 @@ export default function ArvCalculator() {
               <Card>
                 <CardHeader>
                   <CardTitle>Comparable Sales Used ({result.compsUsed})</CardTitle>
+                  <CardDescription>Multi-family and oversized comps are automatically filtered out</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="rounded-md border">
