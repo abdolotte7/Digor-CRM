@@ -34,8 +34,6 @@ import { useToast } from "@/hooks/use-toast";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUSES = ['new', 'contacted', 'qualified', 'negotiating', 'under_contract', 'closed'];
-const [rentcastLoading, setRentcastLoading] = useState(false);
-const [rentcastData, setRentcastData] = useState<{ price: number; low: number; high: number } | null>(null);
 const PROPERTY_TYPES = ["Single Family", "Multi Family", "Condo", "Townhouse", "Mobile Home", "Commercial", "Land", "Other"];
 const OCCUPANCY_OPTIONS = ["Owner Occupied", "Tenant Occupied", "Rented", "Vacant", "Unknown"];
 const LEAD_SOURCES = ["Phone Outreach", "Direct Mail", "Text Blast", "Driving for Dollars", "Online Ads", "Referral", "Wholesale", "MLS", "Submission Form", "Other"];
@@ -533,24 +531,29 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
       });
     }
   }
-async function handleRentcastValuation() {
-  setRentcastLoading(true);
-  setRentcastData(null);
-  try {
-    const token = localStorage.getItem("crm_token");
-    const resp = await fetch(`/api/crm/leads/${leadId}/rentcast-valuation`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || "Valuation failed");
-    setRentcastData(data);
-  } catch (err: any) {
-    toast({ title: "Rentcast failed", description: err.message, variant: "destructive" });
-  } finally {
-    setRentcastLoading(false);
+
+  const [rentcastLoading, setRentcastLoading] = useState(false);
+  const [rentcastData, setRentcastData] = useState<{ price: number; low: number; high: number } | null>(null);
+  
+  async function handleRentcastValuation() {
+    setRentcastLoading(true);
+    setRentcastData(null);
+    try {
+      const token = localStorage.getItem("crm_token");
+      const resp = await fetch(`/api/crm/leads/${leadId}/rentcast-valuation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Valuation failed");
+      setRentcastData(data);
+    } catch (err: any) {
+      toast({ title: "Rentcast failed", description: err.message, variant: "destructive" });
+    } finally {
+      setRentcastLoading(false);
+    }
   }
-}
+
   async function handleFetchComps() {
     if (fetchingComps || compsPolling) return;
     setFetchingComps(true);
