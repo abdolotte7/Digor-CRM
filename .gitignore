@@ -44,9 +44,13 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
-# Replit
+# Platform files (not for public repo)
 .cache/
 .local/
+.replit
+replit.md
+.replit-artifact/
+
 # Monorepo and Build artifacts
 artifacts/**/dist/
 artifacts/**/.vite/

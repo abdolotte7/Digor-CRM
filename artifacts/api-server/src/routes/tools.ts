@@ -828,13 +828,14 @@ router.post("/tools/arv/calculate", requirePin, async (req, res) => {
 
     // Derive price-per-sqft from actual comp data (median of salePrice/sqft)
     const sqftRates = allSales
-      .map((s: any) => {
-        const price = s?.sale?.amount?.saleamt;
-        const sqft  = s?.building?.size?.universalsize;
-        return (price > 0 && sqft > 0) ? price / sqft : null;
-      })
-      .filter((r): r is number => r !== null)
-      .sort((a: number, b: number) => a - b);
+  .map((s: any): number | null => {
+    const price = s?.sale?.amount?.saleamt;
+    const sqft  = s?.building?.size?.universalsize;
+    return (price && sqft) ? price / sqft : null;
+  })
+  .filter((r: number | null): r is number => r !== null)
+  .sort((a: number, b: number) => a - b);
+
 
     const PRICE_PER_SQFT: number = sqftRates.length > 0
       ? sqftRates[Math.floor(sqftRates.length / 2)]!
