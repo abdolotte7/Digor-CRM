@@ -50,6 +50,7 @@ Thumbs.db
 .replit
 replit.md
 .replit-artifact/
+.replitignore
 
 # Monorepo and Build artifacts
 artifacts/**/dist/
