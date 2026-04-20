@@ -1,11 +1,18 @@
 # Digor CRM & Tools Platform
 
+![CI](https://github.com/abdolotte7/digor/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Node 20](https://img.shields.io/badge/node-20-brightgreen)
+![pnpm 10](https://img.shields.io/badge/pnpm-10-orange)
+![Deploy: Railway](https://img.shields.io/badge/deploy-Railway-blueviolet)
+
 A full-stack real estate wholesaling platform built to solve real acquisition, communication, and analysis problems for real estate investors, wholesalers, and agents. The system combines a multi-tenant CRM, an internal tools suite, a public-facing marketing website, and a shared API server — all running as a monorepo deployed on Railway.
 
 ---
 
 ## Table of Contents
 
+- [Getting Started (dev)](#getting-started-dev)
 - [Business Problem & Case Study](#business-problem--case-study)
 - [Architecture Overview](#architecture-overview)
 - [Tech Stack](#tech-stack)
@@ -19,6 +26,65 @@ A full-stack real estate wholesaling platform built to solve real acquisition, c
 - [Database Schema](#database-schema)
 - [Key Engineering Decisions](#key-engineering-decisions)
 - [Environment Variables](#environment-variables)
+- [Production Notes](#production-notes)
+
+---
+
+## Getting Started (dev)
+
+### Prerequisites
+
+- [Node.js 20](https://nodejs.org/) (see `.nvmrc`)
+- [pnpm 10](https://pnpm.io/installation) — `npm install -g pnpm`
+- PostgreSQL (local or remote — see `DATABASE_URL` below)
+
+### Setup
+
+```bash
+# 1. Clone and install all workspace dependencies
+git clone https://github.com/abdolotte7/digor.git
+cd digor
+pnpm install
+
+# 2. Copy the environment template and fill in your values
+cp .env.example .env
+#    At minimum: DATABASE_URL, JWT_SECRET, CRM_ADMIN_EMAIL, CRM_ADMIN_PASSWORD, TOOLS_PIN
+
+# 3. Push the schema to your database (runs Drizzle migrations)
+cd lib/db && pnpm run push && cd ../..
+
+# 4. Run the full type-check across the monorepo
+pnpm run typecheck
+```
+
+### Running locally
+
+Each application has its own dev server. Open separate terminals:
+
+```bash
+# API server (Express 5 — required by all front-ends)
+pnpm --filter @workspace/api-server run dev
+
+# CRM portal  →  http://localhost:<PORT>/crm/
+pnpm --filter @workspace/digor-crm run dev
+
+# Tools portal  →  http://localhost:<PORT>/tools/
+pnpm --filter @workspace/digor-tools run dev
+
+# Public website  →  http://localhost:<PORT>/
+pnpm --filter @workspace/digor-website run dev
+```
+
+> **Replit users:** workflows for each service are pre-configured. Use the
+> Run button or the workflow panel to start them individually.
+
+### Build (production)
+
+```bash
+pnpm run build        # typecheck + build all packages
+```
+
+For architecture details, JWT rules, and comp math see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 
@@ -58,6 +124,65 @@ Digor is a unified platform that consolidates every step of the wholesaling work
 | ARV accuracy (multi-family contamination) | Frequent 20–40% overestimates | Filtered to SFR comps within ±43% sqft |
 | Lead follow-up consistency | Manual and inconsistent | Automated day-offset email sequences |
 | Team accountability | Spreadsheets with no audit trail | Role-gated CRM with task assignments and aging alerts |
+
+### Case Study Walkthrough — Lead to Offer in Under 3 Minutes
+
+**Scenario:** Inbound motivated-seller call. Homeowner at `4821 W Cholla St, Phoenix, AZ 85029`
+is behind on payments and wants to close in 30 days.
+
+**Step 1 — Lead captured (0:00)**
+
+Agent opens "New Lead" in the CRM, fills in seller name, phone, address, and motivation
+("behind on payments"). Saves the record. Total time: ~40 seconds.
+
+**Step 2 — Property data fetched (0:40)**
+
+Agent clicks "Fetch Property Data". One API call to PropertyAPI.co returns:
+- 3 bed / 2 bath / 1,420 sqft / built 1978 / SFR
+- Owner-confirmed absentee (matches mailing address in another state)
+- AVM estimate: $285,000
+
+Fields auto-populate into the lead record. No manual entry.
+
+**Step 3 — Comps pulled and ARV calculated (1:10)**
+
+Agent clicks "Fetch Comps". ATTOM returns 6 SFR sales within 0.5 mi, last 18 months,
+all filtered to 810–2,485 sqft. After per-comp adjustments:
+
+| Address | Sale Price | Adjusted |
+|---|---|---|
+| 4803 W Dahlia Dr | $272,000 | $278,400 |
+| 4915 W Cholla St | $265,000 | $271,500 |
+| 4701 W Joan De Arc | $291,000 | $284,200 |
+| 5003 W Cinnabar Ave | $288,500 | $280,100 |
+| 4822 W Gardenia Ave | $275,000 | $277,800 |
+| 4600 W Eva St | $269,000 | $275,600 |
+
+**Comp-based ARV: $278,950** (median of adjusted values)
+**ATTOM AVM: $281,000** (confidence: 82%) — delta: +0.7% ✓
+
+**Step 4 — AI deal score (1:45)**
+
+Asking price: $195,000. Estimated repairs (from seller description — "roof is 15 years old,
+kitchen needs update"): AI Repair Estimator returns `$28,500` line-item breakdown.
+
+- MAO = $278,950 × 0.70 − $28,500 = **$166,765**
+- AI Deal Score: **8 / 10**
+  - Strengths: strong comp coverage, motivated seller, 30-day close timeline
+  - Risk: roof age — confirm scope before locking in repair budget
+  - Recommendation: Submit offer at $162,000 with 7-day inspection contingency
+
+**Step 5 — Offer letter generated (2:30)**
+
+Agent clicks "Generate Offer Letter". AI produces a professional PDF-ready offer
+document with the property address, offer price ($162,000), 7-day inspection period,
+and 30-day closing. Printed and emailed to seller in one click.
+
+**Total elapsed time: ~2 minutes 45 seconds.**
+
+Without Digor, this same workflow required pulling up Zillow/MLS for comps (15–20 min),
+running a separate skip trace ($0.35/record), manually calculating MAO on a spreadsheet,
+and drafting an offer letter in Word. Typical elapsed time: 60–90 minutes.
 
 ---
 
@@ -483,6 +608,46 @@ Rather than a separate worker process or queue system, the sequence sender runs 
 | `SMTP_USER` | No | SMTP username |
 | `SMTP_PASS` | No | SMTP password |
 | `TOOLS_PIN` | Yes (tools portal) | PIN to access the tools portal |
+
+---
+
+## Production Notes
+
+### Email Sequence Sender
+
+The automated email sequence runs as an **in-process `setInterval`** on the API server
+(fires every hour). This is intentional for simplicity — the job is idempotent (guarded by
+`crm_sequence_logs`) and low-frequency, so it survives restarts safely.
+
+**For production environments with strict uptime requirements**, replace the `setInterval`
+with an external scheduler:
+
+| Option | Notes |
+|---|---|
+| Railway cron job | Native — add a second Railway service with a `0 * * * *` schedule |
+| GitHub Actions scheduled workflow | Free for public repos; reliable if repo is on GitHub |
+| External cron container | Full control; runs independently of the API server |
+
+The sequence sender code lives in `artifacts/api-server/src/services/emailService.ts`.
+
+### JWT Secret Rotation
+
+JWTs are signed with `JWT_SECRET`. Rotating this secret invalidates **all active sessions
+immediately** — users will be logged out. Coordinate rotations during off-peak hours and
+notify your team in advance.
+
+### PropertyAPI Key Depletion State
+
+Key depletion flags (which keys are out of credits) are held **in memory per process**.
+A server restart resets these flags. For high-volume bulk operations, consider persisting
+depletion state in the database or Redis so restarts don't retry exhausted keys.
+
+### Database Migrations
+
+This project uses **Drizzle Kit `push`** (schema push) rather than a migration file system.
+This is appropriate for early-stage development. Before going to production with real customer
+data, switch to `drizzle-kit generate` + `migrate` so schema changes are tracked and
+reversible.
 
 ---
 
