@@ -394,7 +394,8 @@ All four applications share a single PostgreSQL database and are served behind a
 ### Data & Valuation APIs
 | API | Purpose |
 |---|---|
-| ATTOM Data | Comps (`sale/snapshot`), property snapshot, AVM (`attomavm/detail`), mortgage/owner detail (`detailmortgageowner`) |
+| ATTOM Data | Comps (`sale/snapshot`), property snapshot, AVM (`/propertyapi/v1.0.0/avm/detail
+`), mortgage/owner detail (`detailmortgageowner`) |
 | PropertyAPI.co | Property data enrichment, skip trace (up to 7 key rotation), AVM |
 | Rentcast | Rental valuation and AVM for CRM leads |
 | US Census Bureau | Free county FIPS resolution for geo-targeted distressed searches |
@@ -457,7 +458,8 @@ The lead detail page is the core of the CRM. Every feature below is accessible f
 - Deal quality flag: warns when `ARV / asking price < 1.7x`
 - **ATTOM comp fetch**: radius-based lat/lon query via `sale/snapshot`, property-type filter (excludes multi-family), sqft ratio filter (0.57–1.75×), time-appreciation adjustment (3%/year)
 - **Rentcast AVM**: on-demand rental/sale valuation with range
-- **ATTOM AVM**: secondary automated valuation from `/attomavm/detail` with confidence score and low/high range
+- **ATTOM AVM**: secondary automated valuation from `/propertyapi/v1.0.0/avm/detail
+` with confidence score and low/high range
 
 **AI Features (Groq — Llama 3.1 70B)**
 - **AI Deal Scorer**: Scores the deal 1–10 with detailed reasoning; considers ARV, asking price, repair estimate, MAO, seller motivation, property condition, and timeline

@@ -190,7 +190,8 @@ The 70% Rule is the standard wholesale acquisition threshold. Deals where
 
 ### ATTOM AVM as Secondary Signal
 
-The ATTOM AVM (`/attomavm/detail`) is fetched independently and displayed
+The ATTOM AVM (`/propertyapi/v1.0.0/avm/detail
+`) is fetched independently and displayed
 alongside the comp-based ARV. It includes:
 - Point estimate
 - Low / high range
