@@ -6,6 +6,10 @@
 ![pnpm 10](https://img.shields.io/badge/pnpm-10-orange)
 ![Deploy: Railway](https://img.shields.io/badge/deploy-Railway-blueviolet)
 
+**[▶ Live Demo](https://YOUR_RAILWAY_APP.up.railway.app/crm)** — Login: `demo@digorva.com` / `Demo2026!`
+
+> Demo is read-only friendly — seeded with 15 realistic fake leads across Cleveland, Detroit, Atlanta, Memphis, Houston, Pittsburgh, St. Louis, and Louisville.
+
 A full-stack real estate wholesaling platform built to solve real acquisition, communication, and analysis problems for real estate investors, wholesalers, and agents. The system combines a multi-tenant CRM, an internal tools suite, a public-facing marketing website, and a shared API server — all running as a monorepo deployed on Railway.
 
 ---
@@ -87,6 +91,26 @@ pnpm run build        # typecheck + build all packages
 ```
 
 For architecture details, JWT rules, and comp math see [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+---
+
+## Live Demo Setup
+
+To populate a deployed instance with realistic fake data for demos:
+
+```bash
+# 1. Make sure DATABASE_URL is set in your environment
+# 2. Run the demo seed (idempotent — safe to re-run)
+pnpm --filter @workspace/api-server seed:demo
+```
+
+This creates:
+- **Campaign:** Digor Demo
+- **Login:** `demo@digorva.com` / `Demo2026!`
+- **15 fake leads** across Cleveland, Detroit, Atlanta, Memphis, Houston, Pittsburgh, St. Louis, and Louisville — with realistic ARV/MAO math, deal statuses (new → closed), activity notes, tasks, and comps
+- No real PII — all names, phones, and emails are fictional
+
+After seeding, update the demo URL in `artifacts/digor-website/src/components/sections/Hero.tsx` and `README.md` (search for `YOUR_RAILWAY_APP`).
 
 ---
 

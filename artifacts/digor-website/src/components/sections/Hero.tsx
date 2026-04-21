@@ -1,6 +1,8 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Play } from "lucide-react";
+
+const DEMO_URL = "https://YOUR_RAILWAY_APP.up.railway.app/crm";
 
 export function Hero() {
   const scrollTo = (href: string) => {
@@ -47,11 +49,22 @@ export function Hero() {
             Digor LLC is a Managed Marketing and Data Infrastructure Agency delivering precision outreach operations, data engineering, and technical CRM infrastructure to real estate investors.
           </p>
           
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 flex-wrap">
             <Button 
               size="lg"
-              onClick={() => scrollTo("#services")}
+              asChild
               className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90 h-14 px-8 rounded-full font-semibold text-base shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:shadow-[0_0_30px_rgba(212,175,55,0.5)] transition-all"
+            >
+              <a href={DEMO_URL} target="_blank" rel="noopener noreferrer">
+                <Play className="mr-2 h-4 w-4" />
+                Live Demo
+              </a>
+            </Button>
+            <Button 
+              size="lg"
+              variant="outline"
+              onClick={() => scrollTo("#services")}
+              className="w-full sm:w-auto h-14 px-8 rounded-full font-semibold text-base border-border hover:bg-secondary transition-all"
             >
               Explore Our Services
             </Button>

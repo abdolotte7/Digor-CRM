@@ -38,7 +38,7 @@ outputType = "webview"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "PORT=8080 pnpm --filter @workspace/api-server run dev & PORT=3000 pnpm --filter @workspace/digor-website run dev & PORT=3001 pnpm --filter @workspace/digor-crm run dev & PORT=3002 pnpm --filter @workspace/digor-tools run dev & wait"
-waitForPort = 8080
+waitForPort = 3000
 
 [agent]
 stack = "PNPM_WORKSPACE"

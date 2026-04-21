@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "build:prod": "pnpm --filter @workspace/db run push && node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed:demo": "tsx src/seed-demo.ts"
   },
   "dependencies": {
     "@types/bcryptjs": "^3.0.0",
