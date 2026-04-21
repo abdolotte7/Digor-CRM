@@ -151,9 +151,23 @@ Llama 3.1 70B scores the deal 1–10 with profit potential, seller motivation, d
 
 ![AI Deal Scorer](./docs/screenshots/crm-ai-deal-scorer.png)
 
-> **Additional CRM screenshots** (Lead List, Lead Detail, AI Offer Letter, AI Seller Script,
-> Property Lookup) contain real lead data and are omitted from this public repo.
-> Replace with redacted/demo-data screenshots before adding them here.
+### Digor CRM — Lead Detail
+
+Full lead profile: property data fetched from ATTOM, integrated Dialer & SMS panel, deal scoring, AI Seller Script, and AI Offer Letter — all in one view.
+
+![Lead Detail](./docs/screenshots/crm-lead-detail.png)
+
+### Digor CRM — Lead List
+
+Pipeline view with live deal scores, phone + email columns, and one-click access to the dialer. PII redacted in this screenshot.
+
+![Lead List](./docs/screenshots/crm-lead-list.png)
+
+### Digor CRM — AI Offer Letter
+
+One-click AI-generated cash offer letter personalized to the seller's situation, property, and your calculated MAO.
+
+![AI Offer Letter](./docs/screenshots/crm-offer-letter.png)
 
 ---
 
@@ -161,7 +175,21 @@ Llama 3.1 70B scores the deal 1–10 with profit potential, seller motivation, d
 
 Enter any address, choose radius and max comps, and get a full comp table with individual adjustments, median ARV, MAO (70% rule), and conservative offer (65% rule).
 
-![ARV Calculator](./docs/screenshots/tools-arv-calculator.png)
+![ARV Calculator v1](./docs/screenshots/tools-arv-v1.png)
+
+![ARV Calculator v2](./docs/screenshots/tools-arv-v2.png)
+
+### Digor Tools — Repair Cost Estimator
+
+Describe repairs in plain language and get an itemized AI-generated scope of work with line-item costs you can apply directly as the ERC.
+
+![Repair Estimator](./docs/screenshots/tools-repair-estimator.png)
+
+### Digor Tools — Property Lookup
+
+Full property profile — AVM, equity, owner, mortgage, and contact info pulled from ATTOM. Owner name and contact info redacted in this screenshot.
+
+![Property Lookup](./docs/screenshots/tools-property-lookup.png)
 
 ### Digor Tools — Opportunity Finder
 
