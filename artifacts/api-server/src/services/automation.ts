@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { crmTasks, crmUsers, crmCampaigns, crmNotifications, crmLeadFollowers, crmLeads } from "@workspace/db/schema";
 import { eq, and, lte, lt, gt, ne } from "drizzle-orm";
 import { sendEmail, buildNewLeadEmail, buildTaskReminderEmail } from "./emailService";
+import { logger } from "../lib/logger";
 
 async function getCampaignAdmin(campaignId: number) {
   const [campaign] = await db.select().from(crmCampaigns).where(eq(crmCampaigns.id, campaignId)).limit(1);
@@ -126,7 +127,7 @@ export async function onTaskCreated(taskId: number, assignedTo: number | null, l
 }
 
 export async function runTaskAutomationCron() {
-  console.log("[automation] Running task cron...");
+  logger.info("[automation] Running task cron...");
   const now = new Date();
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
@@ -225,7 +226,7 @@ export async function runTaskAutomationCron() {
       await db.update(crmTasks).set({ escalated: true }).where(eq(crmTasks.id, task.id));
     }
 
-    console.log(`[automation] Cron done — ${soonTasks.length} reminders, ${overdueTasks.length} escalations`);
+    logger.info(`[automation] Cron done — ${soonTasks.length} reminders, ${overdueTasks.length} escalations`);
   } catch (err) {
     console.error("[automation] runTaskAutomationCron error:", err);
   }

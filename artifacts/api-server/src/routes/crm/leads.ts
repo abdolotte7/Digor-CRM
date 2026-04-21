@@ -873,9 +873,6 @@ router.post("/:id/fetch-property-data", crmAuth, async (req, res) => {
       if (bestEstimate > 0) updates.currentValue = bestEstimate.toString();
     }
 
-    // Log what was returned vs what changed for debugging
-    console.log("[fetch-property-data] API returned:", JSON.stringify({ beds: data.beds, baths: data.baths, sqft: data.sqft, yearBuilt: data.yearBuilt, ownerName: data.ownerName, lastSaleDate: data.lastSaleDate, lastSalePrice: data.lastSalePrice, propertyType: data.propertyType, avm: data.avm }));
-    console.log("[fetch-property-data] Fields being updated:", Object.keys(updates).filter(k => k !== "updatedAt"));
 
     await db.update(crmLeads).set(updates).where(eq(crmLeads.id, id));
 
@@ -1487,7 +1484,12 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
       mao: newMao,
       comps: insertedComps,
     });
-  
+  } catch (err) {
+    console.error("Fetch comps poll error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── AI Deal Scorer (Complete Backend) ───────────────────────────
 router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
   const id = parseInt(req.params.id as string);

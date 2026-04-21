@@ -13,6 +13,8 @@ A full-stack real estate wholesaling platform built to solve real acquisition, c
 ## Table of Contents
 
 - [Getting Started (dev)](#getting-started-dev)
+- [Deploying](#deploying)
+- [Screenshots](#screenshots)
 - [Business Problem & Case Study](#business-problem--case-study)
 - [Architecture Overview](#architecture-overview)
 - [Tech Stack](#tech-stack)
@@ -85,6 +87,93 @@ pnpm run build        # typecheck + build all packages
 ```
 
 For architecture details, JWT rules, and comp math see [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+---
+
+## Deploying
+
+### Local (Docker-free)
+
+The full stack runs without Docker. You just need Node 20, pnpm 10, and a PostgreSQL instance.
+
+```bash
+# Start all four services (each in its own terminal)
+pnpm --filter @workspace/api-server run dev   # API on $PORT
+pnpm --filter @workspace/digor-crm run dev    # CRM  on $PORT
+pnpm --filter @workspace/digor-tools run dev  # Tools on $PORT
+pnpm --filter @workspace/digor-website run dev # Site on $PORT
+```
+
+Set `DATABASE_URL` in your `.env` to point at a local PostgreSQL instance
+(e.g. `postgresql://postgres:password@localhost:5432/digor`).
+
+### Railway (production)
+
+This repo ships with a [`railway.json`](./railway.json) that defines the build and start commands.
+
+1. Push the repo to GitHub
+2. Create a new Railway project → "Deploy from GitHub repo"
+3. Railway auto-detects the monorepo and applies `railway.json`
+4. Add all env vars from `.env.example` in the Railway Variables panel
+5. Provision a Railway PostgreSQL plugin — the `DATABASE_URL` is injected automatically
+6. Run `pnpm run push` once (via Railway's shell or a one-off deploy command) to push the schema
+
+Railway serves all four applications behind a single domain using path-based routing:
+
+| Path | Application |
+|---|---|
+| `/` | Digor Website (public marketing) |
+| `/crm/` | Digor CRM |
+| `/tools/` | Digor Tools |
+| `/api/` | API Server |
+
+### Other platforms (Render / Cloud Run)
+
+Any platform that supports a Node.js build command works. The key requirements are:
+- Node 20 runtime
+- `pnpm install` + `pnpm run build` as the build step
+- `DATABASE_URL` as an environment variable pointing at a PostgreSQL instance
+- All other env vars from `.env.example` added to the platform's secrets manager
+
+---
+
+## Screenshots
+
+### Digor CRM — Comparable Sales & ARV
+
+Six comps fetched from ATTOM, filtered by property type and sqft ratio, adjusted per comp, with median ARV auto-calculated. Below-threshold ARV/asking ratio flagged in red.
+
+![CRM Comps & ARV](./docs/screenshots/crm-comps-detail.png)
+
+### Digor CRM — AI Deal Scorer
+
+Llama 3.1 70B scores the deal 1–10 with profit potential, seller motivation, deal risk, and urgency subscores — plus a concrete opening price recommendation.
+
+![AI Deal Scorer](./docs/screenshots/crm-ai-deal-scorer.png)
+
+> **Additional CRM screenshots** (Lead List, Lead Detail, AI Offer Letter, AI Seller Script,
+> Property Lookup) contain real lead data and are omitted from this public repo.
+> Replace with redacted/demo-data screenshots before adding them here.
+
+---
+
+### Digor Tools — ARV Calculator
+
+Enter any address, choose radius and max comps, and get a full comp table with individual adjustments, median ARV, MAO (70% rule), and conservative offer (65% rule).
+
+![ARV Calculator](./docs/screenshots/tools-arv-calculator.png)
+
+### Digor Tools — Opportunity Finder
+
+Pull motivated-seller property lists by ZIP or county with ATTOM mortgage-based filters (Absentee Owner, Free & Clear, Pre-Foreclosure, Tax Delinquent, Vacant/Abandoned, High Equity).
+
+![Opportunity Finder](./docs/screenshots/tools-opportunity-finder.png)
+
+### Digor Tools — Lead Scraper
+
+Bulk keyword × location automation across Google Maps, Google Search, NAR Directory, and Zillow. Select keywords and cities, run all combos sequentially, export results as CSV.
+
+![Lead Scraper](./docs/screenshots/tools-lead-scraper.png)
 
 ---
 
