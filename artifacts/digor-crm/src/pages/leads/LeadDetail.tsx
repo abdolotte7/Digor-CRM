@@ -34,7 +34,6 @@ import { useToast } from "@/hooks/use-toast";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUSES = ['new', 'contacted', 'qualified', 'negotiating', 'under_contract', 'closed'];
-
 const PROPERTY_TYPES = ["Single Family", "Multi Family", "Condo", "Townhouse", "Mobile Home", "Commercial", "Land", "Other"];
 const OCCUPANCY_OPTIONS = ["Owner Occupied", "Tenant Occupied", "Rented", "Vacant", "Unknown"];
 const LEAD_SOURCES = ["Phone Outreach", "Direct Mail", "Text Blast", "Driving for Dollars", "Online Ads", "Referral", "Wholesale", "MLS", "Submission Form", "Other"];
@@ -533,6 +532,58 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
     }
   }
 
+  const [rentcastLoading, setRentcastLoading] = useState(false);
+  const [rentcastData, setRentcastData] = useState<{ price: number; low: number; high: number } | null>(null);
+
+  const [attomAvmLoading, setAttomAvmLoading] = useState(false);
+  const [attomAvmData, setAttomAvmData] = useState<{ value: number; low: number; high: number; confidence: number } | null>(null);
+
+  // Hydrate AVM state from saved lead so values persist across reloads
+  useEffect(() => {
+    const r = (lead as any)?.rentcastAvm;
+    if (r && typeof r.price === "number") {
+      setRentcastData({ price: r.price, low: r.low, high: r.high });
+    }
+    const a = (lead as any)?.attomAvm;
+    if (a && typeof a.value === "number") {
+      setAttomAvmData({ value: a.value, low: a.low, high: a.high, confidence: a.confidence ?? 0 });
+    }
+  }, [(lead as any)?.rentcastAvm?.fetchedAt, (lead as any)?.attomAvm?.fetchedAt]);
+
+  async function handleRentcastValuation() {
+    setRentcastLoading(true);
+    try {
+      const data = await apiFetch(`/leads/${leadId}/rentcast-valuation`, { method: "POST" });
+      if (data?.error) throw new Error(data.error);
+      const next = { price: data.price, low: data.low, high: data.high };
+      setRentcastData(next);
+      qc.setQueryData([`/api/crm/leads/${leadId}`], (old: any) =>
+        old ? { ...old, rentcastAvm: { ...next, fetchedAt: new Date().toISOString() } } : old
+      );
+    } catch (err: any) {
+      toast({ title: "Rentcast failed", description: err.message, variant: "destructive" });
+    } finally {
+      setRentcastLoading(false);
+    }
+  }
+
+  async function handleAttomAvm() {
+    setAttomAvmLoading(true);
+    try {
+      const data = await apiFetch(`/leads/${leadId}/attom-avm`, { method: "POST" });
+      if (data?.error) throw new Error(data.error);
+      const next = { value: data.value, low: data.low, high: data.high, confidence: data.confidence };
+      setAttomAvmData(next);
+      qc.setQueryData([`/api/crm/leads/${leadId}`], (old: any) =>
+        old ? { ...old, attomAvm: { ...next, fetchedAt: new Date().toISOString() } } : old
+      );
+    } catch (err: any) {
+      toast({ title: "ATTOM AVM failed", description: err.message, variant: "destructive" });
+    } finally {
+      setAttomAvmLoading(false);
+    }
+  }
+
   async function handleFetchComps() {
     if (fetchingComps || compsPolling) return;
     setFetchingComps(true);
@@ -694,6 +745,47 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
           }
         </div>
       )}
+{/* Rentcast Valuation */}
+<div className="mx-4 mt-3 p-3 rounded-xl bg-secondary/20 border border-border flex items-center justify-between gap-3 flex-wrap">
+  <div>
+    <p className="text-xs font-semibold text-muted-foreground">Rentcast AVM</p>
+    {rentcastData ? (
+      <p className="text-sm font-bold text-primary">
+        {fmt$(rentcastData.price)}
+        <span className="text-xs font-normal text-muted-foreground ml-2">
+          Range: {fmt$(rentcastData.low)} – {fmt$(rentcastData.high)}
+        </span>
+      </p>
+    ) : (
+      <p className="text-xs text-muted-foreground">Not fetched yet (uses 1 credit)</p>
+    )}
+  </div>
+  <Button size="sm" variant="outline" className="rounded-xl gap-2 shrink-0"
+    onClick={handleRentcastValuation} disabled={rentcastLoading}>
+    {rentcastLoading ? <><Loader2 className="w-3 h-3 animate-spin" /> Fetching…</> : "Get Rentcast Estimate"}
+  </Button>
+</div>
+
+      <div className="mx-4 mt-3 p-3 rounded-xl bg-secondary/20 border border-border flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground">ATTOM AVM</p>
+          {attomAvmData ? (
+            <p className="text-sm font-bold text-primary">
+              {fmt$(attomAvmData.value)}
+              <span className="text-xs font-normal text-muted-foreground ml-2">
+                Range: {fmt$(attomAvmData.low)} – {fmt$(attomAvmData.high)}
+                {" · "}Confidence: {attomAvmData.confidence}%
+              </span>
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Not fetched yet</p>
+          )}
+        </div>
+        <Button size="sm" variant="outline" className="rounded-xl gap-2 shrink-0"
+          onClick={handleAttomAvm} disabled={attomAvmLoading}>
+          {attomAvmLoading ? <><Loader2 className="w-3 h-3 animate-spin" /> Fetching…</> : "Get ATTOM AVM"}
+        </Button>
+      </div>
 
       {/* ARV summary banner */}
       {(avgAdjusted || arv) && (
@@ -1114,7 +1206,7 @@ function AiDealScorer({ leadId }: { leadId: number }) {
         <h2 className="font-display font-semibold">AI Deal Scorer</h2>
         <Badge variant="secondary" className="text-xs gap-1"><Sparkles className="w-3 h-3" />AI</Badge>
       </div>
-      
+
       <div className="p-4 space-y-4">
         <Button className="w-full gap-2 rounded-xl" onClick={handleScore} disabled={loading}>
           {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing Activity Logs…</> : <><Sparkles className="w-4 h-4" /> Score This Deal</>}
@@ -1649,7 +1741,7 @@ export default function LeadDetail() {
     if (shouldLoad) loadStoredMessages();
     const interval = setInterval(() => {
       if (leadId && (isSuperAdmin || campaignData?.dialerEnabled)) loadStoredMessages();
-    }, 8000);
+    }, 80000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, opSelectedId, lead?.phone, isSuperAdmin, campaignData?.dialerEnabled]);
@@ -2622,7 +2714,7 @@ export default function LeadDetail() {
 
           {/* AI Offer Letter */}
           <AiOfferLetter leadId={leadId} />
-          
+
           {/* Notes */}
           <Card className="rounded-2xl border-white/5 bg-card shadow-lg flex flex-col">
             <div className="bg-secondary/30 p-4 border-b border-border flex items-center gap-2">

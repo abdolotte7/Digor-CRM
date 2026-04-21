@@ -109,6 +109,8 @@ export async function fetchCompsViaAttom(
   lng: number,
   radiusMiles: number,
   maxComps = 8,
+  subjectSqft?: number | null,
+  subjectPropertyType?: string | null,
 ): Promise<AttomComp[]> {
   const data = await attomGet("/propertyapi/v1.0.0/sale/snapshot", {
     latitude: lat,
@@ -132,8 +134,25 @@ export async function fetchCompsViaAttom(
       const d = new Date(saleDateRaw);
       if (isNaN(d.getTime()) || d < TWO_YEARS_AGO) continue;
     }
+// Skip multi-family / commercial when subject is a single-family home
+const rawPropType = (sale?.summary?.proptype || "").toUpperCase();
+const subjectIsSingleFamily = !subjectPropertyType ||
+  ["single", "sfr", "residential"].some(t => subjectPropertyType.toLowerCase().includes(t));
 
-    const addr = sale?.address;
+if (subjectIsSingleFamily && rawPropType) {
+  const INCOMPATIBLE = ["MULTI", "DUPLEX", "TRIPLEX", "QUADRUPLEX", "COMMERCIAL", "APARTMENT"];
+  if (INCOMPATIBLE.some(m => rawPropType.includes(m))) continue;
+}
+
+// Skip comps where sqft is more than 75% bigger or 43% smaller than subject
+// (ATTOM universalsize on a quadruplex = total building, not per-unit — this filters that out)
+const compSqft: number | undefined = sale?.building?.size?.universalsize;
+if (subjectSqft && compSqft) {
+  const ratio = compSqft / subjectSqft;
+  if (ratio > 1.75 || ratio < 0.57) continue;
+}
+    const addr 
+      = sale?.address;
     const fullAddr = [addr?.line1, addr?.locality, addr?.countrySubd]
       .filter(Boolean).join(", ");
 
@@ -158,31 +177,30 @@ export async function fetchCompsViaAttom(
   return comps;
 }
 
-/**
- * Fetch ATTOM automated valuation model (AVM) for a single property.
- * Endpoint: /attomavm/detail
- * Returns { value, low, high, confidence } or throws on failure.
- */
 export async function fetchAttomAvm(
   street: string,
-  address2: string,
-): Promise<{ value: number; low: number; high: number; confidence: number }> {
-  const data = await attomGet("/attomavm/detail", {
-    address1: street,
-    address2,
-  });fetchAttomAvm
+  cityStateZip: string,
+): Promise<{ value: number; low: number; high: number; confidence: number } | null> {
+  try {
+    // ✅ Use the Property API endpoint, not the legacy one
+    const data = await attomGet("/propertyapi/v1.0.0/avm/detail", {
+      address1: street,
+      address2: cityStateZip,
+    }); 
 
-  const prop = data?.property?.[0];
-  const avm = prop?.avm;
-  const value = avm?.amount?.value ?? avm?.amount?.saleamt ?? 0;
+    const avm = data?.property?.[0]?.avm;
+    if (!avm?.amount?.value) return null;
 
-  if (!value || value <= 0) {
-    throw new Error("ATTOM AVM returned no value for this address");
+    return {
+      value:      Math.round(avm.amount.value),
+      low:        Math.round(avm.amount.low   ?? avm.amount.value),
+      high:       Math.round(avm.amount.high  ?? avm.amount.value),
+      // ✅ Use confidenceScore (numeric) instead of indicatorCode (categorical)
+      confidence: avm.confidenceScore ?? 0,
+    };
+  } catch (err: any) {
+    // ✅ Log the full error object for better debugging
+    logger.warn({ err }, "[ATTOM] fetchAttomAvm failed");
+    return null;
   }
-
-  const low = avm?.amount?.low ?? Math.round(value * 0.9);
-  const high = avm?.amount?.high ?? Math.round(value * 1.1);
-  const confidence = avm?.confidence?.score ?? avm?.condition?.confidencescore ?? 0;
-
-  return { value: Math.round(value), low: Math.round(low), high: Math.round(high), confidence };
 }

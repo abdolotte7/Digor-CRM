@@ -5,7 +5,8 @@ import { eq, desc, ilike, and, or, sql, ne } from "drizzle-orm";
 import { crmAuth, crmAdminOnly } from "./middleware";
 import { onLeadCreated, onLeadStatusChanged } from "../../services/automation";
 import { fetchPropertyData, checkCooldown, recordFetch, runSkipTrace, checkSkipTraceCooldown, recordSkipTrace, getLastSkipTraceError, calculateAdjustedComp, calculateArvFromComps, checkFetchCompsCooldown, recordFetchComps, pollCompsExport, downloadComps} from "../../services/propertyApi";
-import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey } from "../../services/attomApi";
+import { getRentcastValuation } from "../../services/rentcastApi";
+import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey, fetchAttomAvm } from "../../services/attomApi";
 
 // ─── In-memory comps job store ────────────────────────────────────────────────
 interface CompsJob {
@@ -86,6 +87,19 @@ function formatLead(lead: any, assignedUser?: any, campaignName?: string | null)
     skipTracedPhones: lead.skipTracedPhones ? JSON.parse(lead.skipTracedPhones) : [],
     skipTracedEmails: lead.skipTracedEmails ? JSON.parse(lead.skipTracedEmails) : [],
     skipTracedName: lead.skipTracedName ?? null,
+    rentcastAvm: lead.rentcastAvmValue != null ? {
+      price: parseFloat(lead.rentcastAvmValue),
+      low: lead.rentcastAvmLow != null ? parseFloat(lead.rentcastAvmLow) : parseFloat(lead.rentcastAvmValue),
+      high: lead.rentcastAvmHigh != null ? parseFloat(lead.rentcastAvmHigh) : parseFloat(lead.rentcastAvmValue),
+      fetchedAt: lead.rentcastAvmFetchedAt ? lead.rentcastAvmFetchedAt.toISOString() : null,
+    } : null,
+    attomAvm: lead.attomAvmValue != null ? {
+      value: parseFloat(lead.attomAvmValue),
+      low: lead.attomAvmLow != null ? parseFloat(lead.attomAvmLow) : parseFloat(lead.attomAvmValue),
+      high: lead.attomAvmHigh != null ? parseFloat(lead.attomAvmHigh) : parseFloat(lead.attomAvmValue),
+      confidence: lead.attomAvmConfidence ?? 0,
+      fetchedAt: lead.attomAvmFetchedAt ? lead.attomAvmFetchedAt.toISOString() : null,
+    } : null,
   };
 }
 
@@ -873,6 +887,9 @@ router.post("/:id/fetch-property-data", crmAuth, async (req, res) => {
       if (bestEstimate > 0) updates.currentValue = bestEstimate.toString();
     }
 
+    // Log what was returned vs what changed for debugging
+    console.log("[fetch-property-data] API returned:", JSON.stringify({ beds: data.beds, baths: data.baths, sqft: data.sqft, yearBuilt: data.yearBuilt, ownerName: data.ownerName, lastSaleDate: data.lastSaleDate, lastSalePrice: data.lastSalePrice, propertyType: data.propertyType, avm: data.avm }));
+    console.log("[fetch-property-data] Fields being updated:", Object.keys(updates).filter(k => k !== "updatedAt"));
 
     await db.update(crmLeads).set(updates).where(eq(crmLeads.id, id));
 
@@ -963,7 +980,7 @@ router.post("/:id/skip-trace", crmAuth, async (req, res) => {
     // Always store all skip-traced phones/emails/name in dedicated fields
     const updates: Record<string, any> = { updatedAt: new Date() };
     const fieldsUpdated: string[] = [];
-    
+
     // Cast result to any to prevent "Property does not exist" errors
     const skipResult = result as any;
 
@@ -982,7 +999,7 @@ router.post("/:id/skip-trace", crmAuth, async (req, res) => {
     // Always save full skip trace results
     updates["skipTracedPhones"] = JSON.stringify(skipResult.phones || []);
     updates["skipTracedEmails"] = JSON.stringify(skipResult.emails || []);
-    
+
     // Fix: Cast to any specifically for the name check
     if (skipResult.name) {
       updates["skipTracedName"] = skipResult.name;
@@ -1187,7 +1204,7 @@ router.post("/:id/fetch-comps", crmAuth, async (req, res) => {
 
     // FIX: Fallback to 0 if campaignId is null to satisfy TypeScript
     const campaignId = lead.campaignId ?? 0;
-    
+
     let fetchCompsDailyLimit = 1;
     if (campaignId > 0) {
       const [camp] = await db.select({ fetchCompsDailyLimit: crmCampaigns.fetchCompsDailyLimit })
@@ -1437,7 +1454,7 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
         // ── Recalculate ARV ─────────────────────────────────────────────────────
     const allComps = await db.select().from(crmComps).where(eq(crmComps.leadId, id));
     const adjustedPrices: number[] = [];
-    
+
     for (const comp of allComps) {
       if (!comp.salePrice) continue;
       const adj = calculateAdjustedComp(
@@ -1460,7 +1477,7 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
     const newArv = calculatedArv ?? 0; // Default to 0 if null
 
     const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : 0;
-    
+
     // FIX: Now that newArv and erc are guaranteed numbers, math will work
     const newMao = newArv > 0 ? Math.round(newArv * 0.80 - erc) : 0;
 
@@ -1767,5 +1784,85 @@ Reply ONLY with this JSON structure:
         res.status(500).json({ error: "Internal server error" });
   }
 }); 
+
+// ── POST /:id/attom-avm ─────────────────────────────────────────────────────
+router.post("/:id/attom-avm", crmAuth, async (req, res) => {
+  try {
+    const leadId = Number(req.params.id);
+    if (!leadId) { res.status(400).json({ error: "Invalid lead ID" }); return; }
+
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, leadId)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+    if (!lead.address) { res.status(400).json({ error: "Lead has no address" }); return; }
+    const cityStateZip = [lead.city, lead.state, lead.zip].filter(Boolean).join(" ");
+    const result = await fetchAttomAvm(lead.address, cityStateZip);
+
+    if (!result) {
+      res.status(502).json({ error: "ATTOM AVM returned no value for this address" });
+      return;
+    }
+
+    await db.update(crmLeads).set({
+      attomAvmValue: String(result.value),
+      attomAvmLow: String(result.low),
+      attomAvmHigh: String(result.high),
+      attomAvmConfidence: result.confidence ?? null,
+      attomAvmFetchedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(crmLeads.id, leadId));
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("[ATTOM AVM route]", err);
+    res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// ── POST /:id/rentcast-valuation ────────────────────────────────────────────
+router.post("/:id/rentcast-valuation", crmAuth, async (req, res) => {
+  try {
+    const leadId = Number(req.params.id);
+    if (!leadId) { res.status(400).json({ error: "Invalid lead ID" }); return; }
+
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, leadId)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+    if (!lead.address) { res.status(400).json({ error: "Lead has no address" }); return; }
+
+    if (!process.env.RENTCAST_API_KEY) {
+      res.status(503).json({ error: "Rentcast API key not configured" });
+      return;
+    }
+
+    const result = await getRentcastValuation({
+      address: lead.address,
+      city: lead.city,
+      state: lead.state,
+      zip: lead.zip,
+      propertyType: lead.propertyType,
+      beds: lead.beds,
+      baths: lead.baths != null ? Number(lead.baths) : null,
+      sqft: lead.sqft,
+    });
+
+    if (!result) {
+      res.status(502).json({ error: "Rentcast returned no value for this address" });
+      return;
+    }
+
+    await db.update(crmLeads).set({
+      rentcastAvmValue: String(result.price),
+      rentcastAvmLow: String(result.low),
+      rentcastAvmHigh: String(result.high),
+      rentcastAvmFetchedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(crmLeads.id, leadId));
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("[Rentcast AVM route]", err);
+    res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
 
 export default router;
