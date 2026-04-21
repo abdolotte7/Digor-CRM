@@ -5,8 +5,7 @@ import { eq, desc, ilike, and, or, sql, ne } from "drizzle-orm";
 import { crmAuth, crmAdminOnly } from "./middleware";
 import { onLeadCreated, onLeadStatusChanged } from "../../services/automation";
 import { fetchPropertyData, checkCooldown, recordFetch, runSkipTrace, checkSkipTraceCooldown, recordSkipTrace, getLastSkipTraceError, calculateAdjustedComp, calculateArvFromComps, checkFetchCompsCooldown, recordFetchComps, pollCompsExport, downloadComps} from "../../services/propertyApi";
-import { getRentcastValuation } from "../../services/rentcastApi";
-import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey, fetchAttomAvm } from "../../services/attomApi";
+import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey } from "../../services/attomApi";
 
 // ─── In-memory comps job store ────────────────────────────────────────────────
 interface CompsJob {
@@ -764,7 +763,7 @@ Do not include markdown, only the raw JSON object.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
+        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
@@ -874,9 +873,6 @@ router.post("/:id/fetch-property-data", crmAuth, async (req, res) => {
       if (bestEstimate > 0) updates.currentValue = bestEstimate.toString();
     }
 
-    // Log what was returned vs what changed for debugging
-    console.log("[fetch-property-data] API returned:", JSON.stringify({ beds: data.beds, baths: data.baths, sqft: data.sqft, yearBuilt: data.yearBuilt, ownerName: data.ownerName, lastSaleDate: data.lastSaleDate, lastSalePrice: data.lastSalePrice, propertyType: data.propertyType, avm: data.avm }));
-    console.log("[fetch-property-data] Fields being updated:", Object.keys(updates).filter(k => k !== "updatedAt"));
 
     await db.update(crmLeads).set(updates).where(eq(crmLeads.id, id));
 
@@ -1087,7 +1083,7 @@ async function fetchCompsViaAI(lead: any, leadId: number, subjectProp: {
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
+        model: process.env.AI_MODEL || "llama-3.1-70b-versatile",
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
@@ -1280,8 +1276,7 @@ router.post("/:id/fetch-comps", crmAuth, async (req, res) => {
 
     let rawComps;
     try {
-     // CHANGE TO:
-rawComps = await fetchCompsViaAttom(lat, lng, radiusMiles, 8, subjectProp.sqft, lead.propertyType);
+      rawComps = await fetchCompsViaAttom(lat, lng, radiusMiles, 8);
     } catch (attomErr: any) {
       console.error("[ATTOM comps] failed:", attomErr?.message);
       // ATTOM failed → fall back to AI
@@ -1489,12 +1484,12 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
       mao: newMao,
       comps: insertedComps,
     });
-    } catch (err) {
-      console.error("Fetch comps poll error:", err);
-      res.status(500).json({ error: "Internal server error" });
-    }
-    });
-  
+  } catch (err) {
+    console.error("Fetch comps poll error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── AI Deal Scorer (Complete Backend) ───────────────────────────
 router.post("/:id/ai-deal-score", crmAuth, async (req, res) => {
   const id = parseInt(req.params.id as string);
@@ -1578,7 +1573,7 @@ Reply ONLY with this JSON:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile", // Use the 70B model for accurate math/reasoning
+        model: "llama-3.1-70b-versatile", // Use the 70B model for accurate math/reasoning
         max_tokens: 1200,
         response_format: { type: "json_object" },
         messages: [
@@ -1666,7 +1661,7 @@ Reply ONLY with this JSON structure:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "llama-3.1-70b-versatile",
         max_tokens: 1200,
         response_format: { type: "json_object" },
         messages: [
@@ -1744,7 +1739,7 @@ Reply ONLY with this JSON structure:
       method: "POST",
       headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile", 
+        model: "llama-3.1-70b-versatile", 
         // FIX: Increased to 1200. 400 is too short for a letter and will break the JSON.
         max_tokens: 1200, 
         response_format: { type: "json_object" },
@@ -1772,63 +1767,5 @@ Reply ONLY with this JSON structure:
         res.status(500).json({ error: "Internal server error" });
   }
 }); 
-
-router.post("/:id/rentcast-valuation", crmAuth, async (req, res) => {
-  const id = parseInt(req.params.id as string);
-  const crmUser = (req as any).crmUser;
-  try {
-    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
-    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
-    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
-      res.status(403).json({ error: "Access denied" }); return;
-    }
-    if (!process.env.RENTCAST_API_KEY) {
-      res.status(503).json({ error: "Rentcast not configured" }); return;
-    }
-    const result = await getRentcastValuation({
-      address: lead.address,
-      city: lead.city,
-      state: lead.state,
-      zip: lead.zip,
-      propertyType: lead.propertyType,
-      beds: lead.beds,
-      baths: lead.baths ? parseFloat(lead.baths) : null,
-      sqft: lead.sqft,
-    });
-    if (!result) {
-      res.status(503).json({ error: "Rentcast returned no valuation — check address or credits" });
-      return;
-    }
-    res.json(result);
-  } catch (err) {
-    console.error("Rentcast valuation error:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// ── POST /:id/attom-avm ─────────────────────────────────────────────────────
-router.post("/:id/attom-avm", crmAuth, async (req, res) => {
-  try {
-    const leadId = Number(req.params.id);
-    if (!leadId) { res.status(400).json({ error: "Invalid lead ID" }); return; }
-
-    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, leadId)).limit(1);
-    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
-if (!lead.address) { res.status(400).json({ error: "Lead has no address" }); return; }
-    const cityStateZip = [lead.city, lead.state, lead.zip].filter(Boolean).join(" ");
-    const result = await fetchAttomAvm(lead.address, cityStateZip);
-
-
-    if (!result) {
-      res.status(502).json({ error: "ATTOM AVM returned no value for this address" });
-      return;
-    }
-
-    res.json(result);
-  } catch (err: any) {
-    console.error("[ATTOM AVM route]", err);
-    res.status(500).json({ error: err?.message || "Internal server error" });
-  }
-});
 
 export default router;

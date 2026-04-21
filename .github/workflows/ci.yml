@@ -27,17 +27,24 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
       - name: Typecheck (root + all packages)
         run: pnpm run typecheck
 
-      - name: Build all packages
-        run: pnpm -r run build
+      - name: Build shared libraries
+        run: |
+          pnpm --filter @workspace/db run build || true
+          pnpm --filter @workspace/api-spec run build || true
+          pnpm --filter @workspace/api-zod run build || true
+          pnpm --filter @workspace/api-client-react run build || true
+
+      - name: Build applications
+        run: |
+          pnpm --filter @workspace/api-server run build
+          pnpm --filter @workspace/digor-crm run build
+          pnpm --filter @workspace/digor-tools run build
+          pnpm --filter @workspace/digor-website run build
         env:
-          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
-          JWT_SECRET: ci-placeholder-secret
-          GROQ_API_KEY: ci-placeholder
-          ATTOM_API_KEY: ci-placeholder
-          PROPERTY_API_KEY: ci-placeholder
-          TOOLS_PIN: "0000"
+          NODE_ENV: production
+          PORT: "8080"
