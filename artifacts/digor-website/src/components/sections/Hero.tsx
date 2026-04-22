@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, Play } from "lucide-react";
 
-const DEMO_URL = "https://YOUR_RAILWAY_APP.up.railway.app/crm";
+const DEMO_URL = "https://heroic-curiosity-production-dc5a.up.railway.app/crm/";
 
 export function Hero() {
   const scrollTo = (href: string) => {

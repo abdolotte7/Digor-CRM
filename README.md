@@ -6,7 +6,7 @@
 ![pnpm 10](https://img.shields.io/badge/pnpm-10-orange)
 ![Deploy: Railway](https://img.shields.io/badge/deploy-Railway-blueviolet)
 
-**[▶ Live Demo](https://YOUR_RAILWAY_APP.up.railway.app/crm)** — Login: `demo@digorva.com` / `Demo2026!`
+**[▶ Live Demo](https://heroic-curiosity-production-dc5a.up.railway.app/crm/)** — Login: `demo@digorva.com` / `Demo2026!`
 
 > Demo is read-only friendly — seeded with 15 realistic fake leads across Cleveland, Detroit, Atlanta, Memphis, Houston, Pittsburgh, St. Louis, and Louisville.
 
