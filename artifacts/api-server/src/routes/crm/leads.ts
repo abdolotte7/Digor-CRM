@@ -4,7 +4,7 @@ import { crmLeads, crmUsers, crmNotes, crmTasks, crmCampaigns, crmLeadFollowers,
 import { eq, desc, ilike, and, or, sql, ne } from "drizzle-orm";
 import { crmAuth, crmAdminOnly } from "./middleware";
 import { onLeadCreated, onLeadStatusChanged } from "../../services/automation";
-import { fetchPropertyData, checkCooldown, recordFetch, runSkipTrace, checkSkipTraceCooldown, recordSkipTrace, getLastSkipTraceError, calculateAdjustedComp, calculateArvFromComps, checkFetchCompsCooldown, recordFetchComps, pollCompsExport, downloadComps} from "../../services/propertyApi";
+import { fetchPropertyData, checkCooldown, recordFetch, runSkipTrace, checkSkipTraceCooldown, recordSkipTrace, getLastSkipTraceError, calculateAdjustedComp, calculateArvFromComps, calculateMao, getMaoDiscount, checkFetchCompsCooldown, recordFetchComps, pollCompsExport, downloadComps} from "../../services/propertyApi";
 import { getRentcastValuation } from "../../services/rentcastApi";
 import { geocodeViaAttom, fetchCompsViaAttom, hasAttomKey, fetchAttomAvm } from "../../services/attomApi";
 
@@ -237,7 +237,8 @@ router.post("/", crmAuth, async (req, res) => {
     const data = req.body;
     const arv = parseMoney(data.arv);
     const erc = parseMoney(data.estimatedRepairCost);
-    const mao = arv !== null && erc !== null ? arv * 0.80 - erc : parseMoney(data.mao);
+    const conditionForMao = data.condition != null ? Number(data.condition) : null;
+    const mao = arv !== null && erc !== null ? calculateMao(arv, erc, conditionForMao) : parseMoney(data.mao);
 
     const [lead] = await db.insert(crmLeads).values({
       campaignId: campaignId || (data.campaignId ? parseInt(data.campaignId) : null),
@@ -421,7 +422,8 @@ router.patch("/:id", crmAuth, async (req, res) => {
     const data = req.body;
     const arv = data.arv !== undefined ? parseMoney(data.arv) : parseMoney(existing.arv);
     const erc = data.estimatedRepairCost !== undefined ? parseMoney(data.estimatedRepairCost) : parseMoney(existing.estimatedRepairCost);
-    const mao = arv !== null && erc !== null ? arv * 0.80 - erc : (data.mao !== undefined ? parseMoney(data.mao) : parseMoney(existing.mao));
+    const conditionForMao = data.condition != null ? Number(data.condition) : (existing.condition ?? null);
+    const mao = arv !== null && erc !== null ? calculateMao(arv, erc, conditionForMao) : (data.mao !== undefined ? parseMoney(data.mao) : parseMoney(existing.mao));
 
     const updates: any = { updatedAt: new Date() };
     const fields = ["sellerName","phone","email","leadSource","address","city","state","zip","propertyType","status","occupancy","reasonForSelling","howSoon","notes","ownerName","lastSaleDate"];
@@ -716,7 +718,7 @@ router.post("/:id/estimate", crmAuth, async (req, res) => {
     ];
     const totalERC = breakdown.reduce((sum, item) => sum + item.cost, 0);
     const arvEstimate = lead.arv ? parseFloat(lead.arv) : (lead.currentValue ? parseFloat(lead.currentValue) * 1.35 : null);
-    const mao = arvEstimate ? arvEstimate * 0.80 - totalERC : null;
+    const mao = arvEstimate != null ? calculateMao(arvEstimate, totalERC, lead.condition) : null;
     await db.update(crmLeads).set({ estimatedRepairCost: totalERC.toString(), mao: mao ? mao.toString() : null, updatedAt: new Date() }).where(eq(crmLeads.id, id));
     res.json({ estimatedRepairCost: totalERC, breakdown, notes: `Estimate based on ${sqft} sqft ${propertyType} in condition ${condition}/10.`, arv: arvEstimate, mao });
   } catch (err) {
@@ -807,7 +809,7 @@ Do not include markdown, only the raw JSON object.`;
 
     const totalCost = parsed.totalCost || 0;
     const arv = lead.arv ? parseFloat(lead.arv) : null;
-    const mao = arv ? arv * 0.80 - totalCost : null;
+    const mao = arv != null ? calculateMao(arv, totalCost, lead.condition) : null;
 
     await db.update(crmLeads).set({
       estimatedRepairCost: totalCost.toString(),
@@ -1170,7 +1172,7 @@ const rawComps: any[] = parsed?.comps ?? [];
 
     const newArv = calculateArvFromComps(adjustedPrices);
     const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : null;
-    const newMao = newArv && erc != null ? Math.round(newArv * 0.80 - erc) : null;
+    const newMao = newArv != null && erc != null ? calculateMao(newArv, erc, lead.condition) : null;
 
     if (newArv) {
       await db.update(crmLeads)
@@ -1357,7 +1359,7 @@ rawComps = await fetchCompsViaAttom(lat, lng, radiusMiles, 8, subjectProp.sqft, 
 
     const newArv = calculateArvFromComps(adjustedPrices);
     const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : null;
-    const newMao = newArv && erc != null ? Math.round(newArv * 0.80 - erc) : null;
+    const newMao = newArv != null && erc != null ? calculateMao(newArv, erc, lead.condition) : null;
 
     if (newArv) {
       await db.update(crmLeads)
@@ -1480,7 +1482,7 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
     const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : 0;
 
     // FIX: Now that newArv and erc are guaranteed numbers, math will work
-    const newMao = newArv > 0 ? Math.round(newArv * 0.80 - erc) : 0;
+    const newMao = newArv > 0 ? (calculateMao(newArv, erc, lead.condition) ?? 0) : 0;
 
     if (newArv > 0) {
       await db.update(crmLeads)
@@ -1504,6 +1506,169 @@ router.get("/:id/fetch-comps/poll", crmAuth, async (req, res) => {
     });
   } catch (err) {
     console.error("Fetch comps poll error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /crm/leads/:id/fetch-comps-ai — explicit AI comp generation (separate from ATTOM).
+// Persists comps + recalculated ARV/MAO to the DB so they don't disappear on refresh.
+router.post("/:id/fetch-comps-ai", crmAuth, async (req, res) => {
+  const id = parseInt(req.params["id"] as string);
+  const crmUser = (req as any).crmUser;
+  if (!id) { res.status(400).json({ error: "Invalid lead ID" }); return; }
+
+  try {
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+    if (!lead.address) { res.status(400).json({ error: "Lead has no address" }); return; }
+
+    const subjectProp = {
+      beds: lead.beds ?? null,
+      baths: lead.baths ? parseFloat(lead.baths) : null,
+      sqft: lead.sqft ?? null,
+      yearBuilt: lead.yearBuilt ?? null,
+    };
+
+    const aiResult = await fetchCompsViaAI(lead, id, subjectProp);
+    if (aiResult.added === 0) {
+      res.status(503).json({ error: "AI was unable to generate comps. Check that the AI integration is configured." });
+      return;
+    }
+
+    res.json({
+      status: "done",
+      success: true,
+      aiGenerated: true,
+      added: aiResult.added,
+      comps: aiResult.comps,
+      arv: aiResult.arv,
+      mao: aiResult.mao,
+    });
+  } catch (err) {
+    console.error("AI fetch comps error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /crm/leads/:id/detect-condition — uses AI to read notes + activity log
+// and infer the property condition (1-10), then persists it to the lead so
+// MAO can be recalculated with the right discount factor (70/80/90 rule).
+router.post("/:id/detect-condition", crmAuth, async (req, res) => {
+  const id = parseInt(req.params["id"] as string);
+  const crmUser = (req as any).crmUser;
+  if (!id) { res.status(400).json({ error: "Invalid lead ID" }); return; }
+
+  try {
+    const [lead] = await db.select().from(crmLeads).where(eq(crmLeads.id, id)).limit(1);
+    if (!lead) { res.status(404).json({ error: "Lead not found" }); return; }
+
+    if (crmUser.role !== "super_admin" && lead.campaignId !== crmUser.campaignId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+
+    const aiBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const aiApiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    if (!aiBaseUrl || !aiApiKey) {
+      res.status(503).json({ error: "AI service not configured" });
+      return;
+    }
+
+    const notes = await db.select().from(crmNotes)
+      .where(eq(crmNotes.leadId, id))
+      .orderBy(desc(crmNotes.createdAt))
+      .limit(30);
+
+    const activityLog = notes.length
+      ? notes.map(n => `[${n.createdAt?.toISOString().split("T")[0]}] ${n.content}`).join("\n")
+      : "";
+
+    const propertyContext =
+      `Address: ${[lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ")}\n` +
+      `Property type: ${lead.propertyType ?? "?"}, Year built: ${lead.yearBuilt ?? "?"}\n` +
+      `Beds: ${lead.beds ?? "?"}, Baths: ${lead.baths ?? "?"}, Sqft: ${lead.sqft ?? "?"}\n` +
+      `Reason for selling: ${lead.reasonForSelling ?? "?"}\n` +
+      `How soon: ${lead.howSoon ?? "?"}\n` +
+      `General notes: ${lead.notes ?? "(none)"}\n` +
+      `Recent activity:\n${activityLog || "(no activity logged)"}`;
+
+    const systemPrompt =
+      "You are a real estate investment analyst evaluating a property's physical condition based on " +
+      "available notes and seller communication. Score the condition strictly 1-10 where: " +
+      "1-3 = heavy rehab / structural issues / gut job; 4-6 = light to moderate updates needed; " +
+      "7-10 = good to turnkey condition. Be conservative when evidence is thin. " +
+      "Reply ONLY with valid JSON.";
+    const userPrompt =
+      `Based on the information below, infer the subject property's condition on a 1-10 scale.\n\n` +
+      `${propertyContext}\n\n` +
+      `Reply with: {"condition": <integer 1-10>, "rationale": "<one short sentence>", "confidence": "low"|"medium"|"high"}`;
+
+    const aiRes = await fetch(`${aiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || "llama-3.3-70b-versatile",
+        max_tokens: 200,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+
+    if (!aiRes.ok) {
+      res.status(502).json({ error: `AI call failed: ${aiRes.status}` });
+      return;
+    }
+
+    const json = await aiRes.json() as any;
+    const raw = json?.choices?.[0]?.message?.content ?? "";
+    const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+
+    let parsed: { condition?: number; rationale?: string; confidence?: string };
+    try { parsed = JSON.parse(cleaned); }
+    catch {
+      res.status(502).json({ error: "AI returned an unexpected format" });
+      return;
+    }
+
+    const cond = Math.round(Number(parsed.condition));
+    if (!Number.isFinite(cond) || cond < 1 || cond > 10) {
+      res.status(502).json({ error: "AI returned an invalid condition score" });
+      return;
+    }
+
+    const discount = getMaoDiscount(cond);
+    const arv = lead.arv ? parseFloat(lead.arv) : null;
+    const erc = lead.estimatedRepairCost ? parseFloat(lead.estimatedRepairCost) : null;
+    const newMao = calculateMao(arv, erc, cond);
+
+    const updates: any = { condition: cond, updatedAt: new Date() };
+    if (newMao != null) updates.mao = newMao.toString();
+    await db.update(crmLeads).set(updates).where(eq(crmLeads.id, id));
+
+    // Log to activity so users can see the AI's reasoning.
+    await db.insert(crmNotes).values({
+      leadId: id,
+      userId: crmUser.userId,
+      content:
+        `🤖 AI condition assessment: ${cond}/10 (${parsed.confidence ?? "—"} confidence). ` +
+        `MAO discount factor set to ${Math.round(discount * 100)}%. ` +
+        `Reason: ${parsed.rationale ?? "no rationale provided"}`,
+    });
+
+    res.json({
+      condition: cond,
+      rationale: parsed.rationale ?? null,
+      confidence: parsed.confidence ?? null,
+      discountFactor: discount,
+      mao: newMao,
+    });
+  } catch (err) {
+    console.error("AI detect-condition error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

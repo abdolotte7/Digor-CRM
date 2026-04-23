@@ -584,6 +584,45 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
     }
   }
 
+  const [fetchingAiComps, setFetchingAiComps] = useState(false);
+  async function handleFetchCompsAi() {
+    if (fetchingAiComps || fetchingComps || compsPolling) return;
+    setFetchingAiComps(true);
+    try {
+      const data = await apiFetch(`/leads/${leadId}/fetch-comps-ai`, { method: "POST" });
+      if (data?.error) throw new Error(data.error);
+      applyFetchCompsResult(data);
+      toast({
+        title: "AI comps generated",
+        description: `${data.added} AI-estimated comps saved. ARV updated.`,
+      });
+    } catch (err: any) {
+      toast({ title: "AI comps failed", description: err.message, variant: "destructive" });
+    } finally {
+      setFetchingAiComps(false);
+    }
+  }
+
+  const [detectingCondition, setDetectingCondition] = useState(false);
+  async function handleDetectCondition() {
+    if (detectingCondition) return;
+    setDetectingCondition(true);
+    try {
+      const data = await apiFetch(`/leads/${leadId}/detect-condition`, { method: "POST" });
+      if (data?.error) throw new Error(data.error);
+      qc.invalidateQueries({ queryKey: [`/api/crm/leads/${leadId}`] });
+      qc.invalidateQueries({ queryKey: [`/api/crm/leads/${leadId}/notes`] });
+      toast({
+        title: `Condition: ${data.condition}/10`,
+        description: `Discount factor ${Math.round((data.discountFactor ?? 0.8) * 100)}% applied. ${data.rationale ?? ""}`,
+      });
+    } catch (err: any) {
+      toast({ title: "Detect condition failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDetectingCondition(false);
+    }
+  }
+
   async function handleFetchComps() {
     if (fetchingComps || compsPolling) return;
     setFetchingComps(true);
@@ -716,13 +755,37 @@ function CompsSection({ leadId, lead }: { leadId: number; lead: any }) {
             <Button
               size="sm" variant="outline"
               className="h-7 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10"
-              disabled={fetchingComps || !!compsPolling}
+              disabled={fetchingComps || !!compsPolling || fetchingAiComps}
               onClick={handleFetchComps}
               title="Auto-fetch recently-sold comparable properties from PropertyAPI within the selected radius"
             >
               {(fetchingComps || compsPolling)
                 ? <><RefreshCw className="w-3 h-3 animate-spin" /> {fetchingComps ? "Starting…" : "Processing…"}</>
                 : <><Database className="w-3 h-3" /> Fetch Comps</>
+              }
+            </Button>
+            <Button
+              size="sm" variant="outline"
+              className="h-7 text-xs gap-1 border-violet-500/40 text-violet-500 hover:bg-violet-500/10"
+              disabled={fetchingAiComps || fetchingComps || !!compsPolling}
+              onClick={handleFetchCompsAi}
+              title="Generate comparable sales using AI (saved permanently to this lead)"
+            >
+              {fetchingAiComps
+                ? <><RefreshCw className="w-3 h-3 animate-spin" /> Asking AI…</>
+                : <><Sparkles className="w-3 h-3" /> AI Comps</>
+              }
+            </Button>
+            <Button
+              size="sm" variant="outline"
+              className="h-7 text-xs gap-1 border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+              disabled={detectingCondition}
+              onClick={handleDetectCondition}
+              title="Use AI to read the notes & activity log and infer property condition (1-10). Updates MAO with the right discount factor (70/80/90 rule)."
+            >
+              {detectingCondition
+                ? <><RefreshCw className="w-3 h-3 animate-spin" /> Analyzing…</>
+                : <><Sparkles className="w-3 h-3" /> Detect Condition</>
               }
             </Button>
           </div>

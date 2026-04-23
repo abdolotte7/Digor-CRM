@@ -112,11 +112,12 @@ export async function fetchCompsViaAttom(
   subjectSqft?: number | null,
   subjectPropertyType?: string | null,
 ): Promise<AttomComp[]> {
+  // Pull a much larger raw pool so post-filter we still have plenty of usable comps.
   const data = await attomGet("/propertyapi/v1.0.0/sale/snapshot", {
     latitude: lat,
     longitude: lng,
     radius: radiusMiles,
-    pagesize: Math.min(maxComps * 4, 50),
+    pagesize: 100,
   });
 
   const sales: any[] = data?.property || [];
@@ -124,33 +125,36 @@ export async function fetchCompsViaAttom(
   TWO_YEARS_AGO.setMonth(TWO_YEARS_AGO.getMonth() - 24);
 
   const comps: AttomComp[] = [];
+  const excluded: Record<string, number> = { noPrice: 0, oldSale: 0, multiFamily: 0, sqftMismatch: 0 };
+
+  // Only filter multi-family if the subject is *explicitly* single-family.
+  // (Was: also triggered when subjectPropertyType was missing → over-filtered.)
+  const subjStr = (subjectPropertyType || "").toLowerCase();
+  const subjectIsSingleFamily = ["single", "sfr", "residential", "sfh"].some(t => subjStr.includes(t));
 
   for (const sale of sales) {
     const salePrice = sale?.sale?.amount?.saleamt;
-    if (!salePrice || salePrice <= 0) continue;
+    if (!salePrice || salePrice <= 0) { excluded.noPrice++; continue; }
 
     const saleDateRaw = sale?.sale?.saleTransDate || sale?.sale?.salesearchdate;
     if (saleDateRaw) {
       const d = new Date(saleDateRaw);
-      if (isNaN(d.getTime()) || d < TWO_YEARS_AGO) continue;
+      if (isNaN(d.getTime()) || d < TWO_YEARS_AGO) { excluded.oldSale++; continue; }
     }
-// Skip multi-family / commercial when subject is a single-family home
-const rawPropType = (sale?.summary?.proptype || "").toUpperCase();
-const subjectIsSingleFamily = !subjectPropertyType ||
-  ["single", "sfr", "residential"].some(t => subjectPropertyType.toLowerCase().includes(t));
 
-if (subjectIsSingleFamily && rawPropType) {
-  const INCOMPATIBLE = ["MULTI", "DUPLEX", "TRIPLEX", "QUADRUPLEX", "COMMERCIAL", "APARTMENT"];
-  if (INCOMPATIBLE.some(m => rawPropType.includes(m))) continue;
-}
+    const rawPropType = (sale?.summary?.proptype || "").toUpperCase();
+    if (subjectIsSingleFamily && rawPropType) {
+      const INCOMPATIBLE = ["MULTI", "DUPLEX", "TRIPLEX", "QUADRUPLEX", "COMMERCIAL", "APARTMENT", "CONDO"];
+      if (INCOMPATIBLE.some(m => rawPropType.includes(m))) { excluded.multiFamily++; continue; }
+    }
 
-// Skip comps where sqft is more than 75% bigger or 43% smaller than subject
-// (ATTOM universalsize on a quadruplex = total building, not per-unit — this filters that out)
-const compSqft: number | undefined = sale?.building?.size?.universalsize;
-if (subjectSqft && compSqft) {
-  const ratio = compSqft / subjectSqft;
-  if (ratio > 1.75 || ratio < 0.57) continue;
-}
+    // Wider sqft band so we don't drop too many comps.
+    // (Was 1.75 / 0.57 — too tight on small subjects.)
+    const compSqft: number | undefined = sale?.building?.size?.universalsize;
+    if (subjectSqft && compSqft) {
+      const ratio = compSqft / subjectSqft;
+      if (ratio > 2.0 || ratio < 0.5) { excluded.sqftMismatch++; continue; }
+    }
     const addr 
       = sale?.address;
     const fullAddr = [addr?.line1, addr?.locality, addr?.countrySubd]

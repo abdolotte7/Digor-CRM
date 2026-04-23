@@ -612,10 +612,38 @@ return Math.max(0, Math.round(capped));
 }
 
 /**
- * Derive ARV from adjusted comp prices.
- * Uses average; if >3 comps drops highest/lowest outliers first.
+ * Pick the MAO discount factor based on subject property condition (1-10 scale).
+ *  - Heavy rehab / poor condition (1-3) → 0.70 (30% buffer for risk + holding costs)
+ *  - Light updates / fair condition  (4-6) → 0.80 (typical wholesale)
+ *  - Good / turnkey condition         (7-10) → 0.90 (competitive offer for retail-ready)
+ * Defaults to 0.80 when condition is unknown.
  */
-// CHANGE TO:
+export function getMaoDiscount(condition: number | null | undefined): number {
+  if (condition == null || isNaN(condition)) return 0.80;
+  if (condition <= 3) return 0.70;
+  if (condition <= 6) return 0.80;
+  return 0.90;
+}
+
+/**
+ * Compute MAO from ARV, repair cost and condition.
+ *   MAO = (ARV × discountFactor) − Repair Cost
+ * Returns null if either input is missing.
+ */
+export function calculateMao(
+  arv: number | null | undefined,
+  repairCost: number | null | undefined,
+  condition: number | null | undefined,
+): number | null {
+  if (arv == null || repairCost == null) return null;
+  const discount = getMaoDiscount(condition);
+  return Math.max(0, Math.round(arv * discount - repairCost));
+}
+
+/**
+ * Derive ARV from adjusted comp prices.
+ * Uses median; if >3 comps drops highest/lowest outliers first.
+ */
 export function calculateArvFromComps(adjustedPrices: number[]): number | null {
   let prices = [...adjustedPrices].filter(p => p > 0).sort((a, b) => a - b);
   if (prices.length === 0) return null;
